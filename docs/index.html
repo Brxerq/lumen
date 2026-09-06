@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0c10">
+<!-- Short enough to survive a browser tab and a search result; the sentence the
+     title used to carry is the description's job, and it is still on the page. -->
+<title>Lumen — the devices around you react</title>
+<meta name="description" content="Lumen is a local device-feedback layer for developers. Your coding agent needs you, a build fails, a long command ends — and your keyboard, light bar, smart lights or screen edge say so. No accounts, no cloud, no telemetry.">
+<link rel="canonical" href="https://brxerq.github.io/lumen/">
+<!-- Link previews. og:image is a 1200x630 card (scripts/social_card.py), not the
+     logo: a square mark in a wide frame is what makes a shared link look broken.
+     The same file is the repository's social preview. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Lumen">
+<meta property="og:url" content="https://brxerq.github.io/lumen/">
+<meta property="og:title" content="Lumen — the devices around you react">
+<meta property="og:description" content="Your coding agent needs you, a build fails, a long command ends — and your keyboard, light bar, smart lights or screen edge say so. Local, no account.">
+<meta property="og:image" content="https://brxerq.github.io/lumen/brand/png/lumen-social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Lumen — four keyboard zones coloured amber for working, red for needs you, green for done, and one dark for no tab open.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Lumen — the devices around you react">
+<meta name="twitter:description" content="Your coding agent needs you, a build fails, a long command ends — and your keyboard, light bar, smart lights or screen edge say so. Local, no account.">
+<meta name="twitter:image" content="https://brxerq.github.io/lumen/brand/png/lumen-social.png">
+<link rel="icon" type="image/svg+xml" href="brand/svg/lumen-icon.svg">
+<link rel="alternate icon" href="brand/icons/lumen-icon.ico">
+<link rel="apple-touch-icon" href="brand/icons/lumen-icon-256.png">
+<!-- Outfit is the brand's documented companion face (docs/brand/README.md).
+     Everything below it in the stack is a system geometric sans, so the page is
+     fully typeset before — or without — the webfont ever arriving. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap">
+<style>
+/* Palette, radii and type stacks are the dashboard's own tokens
+   (src/lumen/server/ui/styles.css). The site and the product are one surface. */
+:root{
+  color-scheme: dark;
+  --bg:#0b0c10; --bg-2:#0e1016;
+  --panel:#15181f; --panel-2:#1c2029; --panel-3:#242934;
+  --border:#272c36; --border-2:#343a47;
+  --text:#eef0f5; --muted:#9aa0b0; --dim:#6a7183;
+  --green:#4ade80; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa; --cyan:#22d3ee;
+  /* Static brand accents from docs/brand/palette.json. Never used for status. */
+  --violet-field:#DCC8F6; --cyan-field:#B8EAF3;
+  --font-display:"Outfit","Avenir Next",Avenir,Nunito,"Century Gothic","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+  --font:"Segoe UI Variable Text",-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,Ubuntu,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --radius:14px; --radius-sm:9px;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 24px -12px rgba(0,0,0,.7);
+  --gutter:clamp(20px,5vw,64px);
+  --measure:1180px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+body{color:var(--text);font-family:var(--font);font-size:16px;line-height:1.6;
+     -webkit-font-smoothing:antialiased;overflow-wrap:break-word;
+     /* The two static brand fields as page-wide ambience, far too faint to read as status. */
+     background:
+       radial-gradient(1100px 560px at 82% -8%, rgba(184,234,243,.045), transparent 62%),
+       radial-gradient(900px 500px at 8% -4%, rgba(220,200,246,.04), transparent 62%),
+       var(--bg)}
+a{color:inherit;text-decoration:none}
+img,svg{max-width:100%}
+::selection{background:rgba(74,222,128,.28)}
+:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:4px}
+
+/* keyboard users get a way past the sticky header */
+.skip{position:absolute;left:16px;top:-56px;z-index:100;background:var(--green);color:var(--bg);
+      font-size:14px;font-weight:600;padding:9px 18px;border-radius:999px;transition:top .18s ease}
+.skip:focus-visible{top:12px;outline-color:var(--text)}
+
+.wrap{max-width:var(--measure);margin:0 auto;padding:0 var(--gutter)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.eyebrow .num{color:var(--green);margin-right:12px}
+h1,h2,h3{font-family:var(--font-display);font-weight:700;letter-spacing:-.03em;line-height:1.06;text-wrap:balance}
+h2{font-size:clamp(30px,4.4vw,50px)}
+h3{font-size:19px;letter-spacing:-.015em;line-height:1.3}
+p{color:var(--muted)}
+.lead{font-size:clamp(17px,1.5vw,20px);max-width:60ch;text-wrap:pretty}
+
+/* ---------- nav ---------- */
+.nav{position:sticky;top:0;z-index:50;background:rgba(11,12,16,.72);backdrop-filter:blur(14px);
+     border-bottom:1px solid transparent;transition:border-color .2s,box-shadow .2s}
+.nav.stuck{border-bottom-color:var(--border);box-shadow:0 12px 32px -18px rgba(0,0,0,.8)}
+.nav-in{display:flex;align-items:center;gap:26px;height:66px}
+.logo{display:flex;align-items:center;gap:10px;margin-right:auto}
+.logo img{height:38px;width:auto;display:block}
+.logo .ver{font-family:var(--mono);font-size:11px;color:var(--dim);padding-top:3px}
+.nav a.link{position:relative;color:var(--muted);font-size:15px;font-weight:500;transition:color .12s}
+.nav a.link:hover{color:var(--text)}
+.nav a.link::after{content:"";position:absolute;left:50%;bottom:-7px;width:4px;height:4px;border-radius:50%;
+                   background:var(--green);opacity:0;transform:translateX(-50%);transition:opacity .15s}
+.nav a.link.on{color:var(--text)}
+.nav a.link.on::after{opacity:1}
+.nav .ghost{border:1px solid var(--border-2);border-radius:999px;padding:7px 16px;color:var(--text);
+            font-size:14px;font-weight:600;transition:background .12s,border-color .12s}
+.nav .ghost:hover{background:var(--panel-2);border-color:var(--dim)}
+@media (max-width:720px){ .nav a.link{display:none} }
+
+/* ---------- hero ---------- */
+.hero{padding:clamp(56px,9vw,110px) 0 clamp(40px,6vw,72px)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:clamp(32px,6vw,80px);align-items:center}
+@media (max-width:900px){ .hero-grid{grid-template-columns:1fr;gap:44px} }
+.hero h1{font-size:clamp(40px,5.2vw,64px);margin:18px 0 22px}
+.hero h1 em{font-style:normal;color:var(--dim)}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .hero h1 em{background:linear-gradient(92deg,var(--violet-field),var(--cyan-field));
+              -webkit-background-clip:text;background-clip:text;color:transparent}
+}
+.hero .lead{margin-bottom:34px}
+
+.cmd{display:inline-flex;align-items:center;gap:14px;font-family:var(--mono);font-size:14.5px;max-width:100%;
+     background:var(--panel);border:1px solid var(--border-2);border-radius:999px;padding:9px 9px 9px 20px}
+.cmd code{white-space:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
+.cmd code::-webkit-scrollbar{display:none}
+.cmd button{flex:none}
+.cmd .dollar{color:var(--dim);flex:none}
+.cmd code{color:var(--text)}
+.cmd button{font:inherit;font-size:13px;cursor:pointer;color:var(--bg);background:var(--green);
+            border:0;border-radius:999px;padding:7px 15px;font-weight:600;transition:filter .12s}
+.cmd button:hover{filter:brightness(1.08)}
+/* Must come after the pill rules above, or the 999px radius wins. */
+@media (max-width:760px){
+  .cmd{display:flex;width:100%;border-radius:14px;align-items:stretch;gap:0;padding:0;
+       flex-direction:column}
+  .cmd .dollar{display:none}
+  .cmd code{white-space:pre-wrap;word-break:break-all;padding:15px 17px;font-size:15px;line-height:1.55}
+  .cmd button{border-radius:0 0 13px 13px;padding:12px;width:100%}
+}
+.hero-alt{margin-top:14px;font-size:14px;color:var(--dim)}
+.hero-alt code{font-family:var(--mono);color:var(--muted)}
+.hero-alt a{color:var(--muted);border-bottom:1px solid var(--border-2);transition:color .12s,border-color .12s}
+.hero-alt a:hover{color:var(--text);border-color:var(--dim)}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:30px}
+.badge{font-size:12.5px;font-family:var(--mono);color:var(--muted);border:1px solid var(--border);
+       border-radius:999px;padding:5px 12px;background:var(--bg-2)}
+
+/* headline numbers, scraped from the README tables */
+.stats{display:flex;flex-wrap:wrap;gap:20px clamp(28px,5vw,64px);margin-top:clamp(40px,6vw,64px);
+       padding-top:28px;border-top:1px solid var(--border)}
+.stat b{display:block;font-family:var(--font-display);font-size:clamp(24px,2.4vw,30px);font-weight:700;
+        letter-spacing:-.02em;color:var(--text);line-height:1.1}
+.stat span{font-family:var(--mono);font-size:12px;color:var(--dim)}
+
+/* --- hero stage: the mark is the demo. Its two light fields are the same two
+       surfaces the app drives (top = keyboard/Claude, bottom = light bar/Codex),
+       cycling the real default palette: red needs you, amber working, green idle. --- */
+.stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:26px;
+       padding:48px 28px 44px;border:1px solid var(--border);border-radius:26px;overflow:hidden;background:
+       radial-gradient(120% 90% at 50% 0%, var(--panel) 0%, var(--bg-2) 62%, var(--bg) 100%)}
+.stage::after{content:"";position:absolute;inset:0;border-radius:26px;pointer-events:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.stage .tag{position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:7px;
+            font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.stage .tag i{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.mark{width:min(210px,52vw);height:auto;display:block}
+.mark .shell{fill:#fff}
+.mark .field{transition:fill .5s ease, filter .5s ease}
+.stage-cap{display:flex;align-items:center;gap:11px;font-size:15px;color:var(--text);min-height:24px}
+.stage-cap .dot{width:9px;height:9px;border-radius:50%;flex:none;transition:background .5s ease,box-shadow .5s ease}
+.stage-cap .txt{transition:opacity .22s ease}
+.stage-cap.swap .txt{opacity:0}
+.stage-cap .ev{font-family:var(--mono);font-size:13px;color:var(--dim)}
+.stage-foot{font-size:12.5px;color:var(--dim);text-align:center;max-width:34ch}
+
+/* ---------- section frame ---------- */
+section{padding:clamp(64px,9vw,116px) 0}
+section.wrap{padding-top:clamp(64px,9vw,116px);padding-bottom:clamp(64px,9vw,116px)}
+.sec-head{max-width:64ch;margin-bottom:clamp(34px,5vw,58px)}
+.sec-head h2{margin:14px 0 16px}
+
+/* ---------- states ---------- */
+.states{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--border);
+        border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+@media (max-width:760px){ .states{grid-template-columns:1fr} }
+.state{position:relative;background:var(--bg-2);padding:28px 24px 30px;transition:background .2s}
+.state::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:var(--accent)}
+@media (hover:hover){ .state:hover{background:var(--panel)} }
+.state .swatch{width:44px;height:8px;border-radius:4px;margin-bottom:20px;background:var(--accent);
+               box-shadow:0 0 14px -2px var(--accent);transition:box-shadow .25s}
+.state:hover .swatch{box-shadow:0 0 22px -2px var(--accent)}
+.state h3{margin-bottom:7px}
+.state p{font-size:14.5px}
+.state code{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+
+/* ---------- hardware demo: the same event on three classes of machine ---------- */
+.tabs{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;margin-bottom:26px;
+      border:1px solid var(--border);border-radius:999px;background:var(--bg-2)}
+.tabs button{font:inherit;font-size:14px;font-weight:500;cursor:pointer;background:transparent;border:0;
+             color:var(--muted);padding:9px 17px;border-radius:999px;transition:background .15s,color .15s}
+.tabs button:hover{color:var(--text)}
+.tabs button[aria-selected="true"]{background:var(--panel-2);color:var(--text);font-weight:600}
+/* a pill radius around a wrapped two-row group reads as a mistake */
+@media (max-width:560px){ .tabs{border-radius:14px} .tabs button{border-radius:10px} }
+.rig{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:clamp(24px,4vw,52px);
+     align-items:center;border:1px solid var(--border);border-radius:20px;
+     padding:clamp(22px,3.4vw,44px);
+     background:radial-gradient(120% 100% at 50% 0%, var(--panel) 0%, var(--bg-2) 60%, var(--bg) 100%)}
+@media (max-width:860px){ .rig{grid-template-columns:1fr;gap:30px} }
+.rig svg{width:100%;height:auto;display:block}
+[hidden]{display:none!important}
+/* Panels re-enter gently when a tab switches; display:none restarts the animation. */
+[role="tabpanel"]{animation:panelin .38s cubic-bezier(.22,.61,.36,1)}
+@keyframes panelin{from{opacity:0;transform:translateY(8px)}}
+.plate{fill:#101219;stroke:var(--border-2);stroke-width:2}
+/* zone keyboard: one board, its keys coloured a zone at a time */
+.zkey{transition:fill .5s ease, stroke .5s ease, fill-opacity .5s ease}
+/* per-key board */
+.keycap{transition:fill .5s ease, stroke .5s ease}
+.ktxt{font-family:var(--mono);font-size:14px;text-anchor:middle;transition:fill .5s ease}
+.dimkey{fill:#161a22;stroke:#232833;stroke-width:1.5}
+.caplabel{font-family:var(--mono);font-size:13px;fill:var(--dim)}
+.screenmock{fill:#191d26}
+.glowline{transition:stroke .5s ease}
+.seg{transition:fill .5s ease,opacity .5s ease}
+.toast{transition:opacity .4s ease,transform .4s ease}
+.toast.off{opacity:0;transform:translateY(-8px)}
+.rig-note h3{margin-bottom:12px}
+.rig-note p{font-size:14.5px}
+.rig-note .kit{margin-top:16px;font-family:var(--mono);font-size:12.5px;color:var(--dim);line-height:1.8}
+.readout{display:flex;align-items:center;gap:11px;margin-top:26px;font-size:15px;color:var(--text);
+         min-height:24px;flex-wrap:wrap}
+.readout .dot{width:9px;height:9px;border-radius:50%;flex:none;transition:background .5s,box-shadow .5s}
+.readout .ev{font-family:var(--mono);font-size:13px;color:var(--dim)}
+.readout .txt{transition:opacity .22s ease}
+.readout.swap .txt{opacity:0}
+
+/* ---------- devices: an editorial list, not a card grid ---------- */
+.dev{display:grid;grid-template-columns:26px minmax(0,1fr) minmax(0,1.15fr);gap:20px;align-items:baseline;
+     padding:22px 12px;margin:0 -12px;border-radius:12px;border-top:1px solid var(--border);
+     transition:background .18s}
+.dev:last-child{border-bottom:1px solid var(--border)}
+@media (hover:hover){ .dev:hover{background:rgba(255,255,255,.02)} }
+.dev svg{width:20px;height:20px;fill:none;stroke:var(--dim);stroke-width:1.6;
+         stroke-linecap:round;stroke-linejoin:round;transform:translateY(3px);transition:stroke .18s}
+.dev:hover svg{stroke:var(--muted)}
+.dev-name{font-weight:600;font-size:16px;color:var(--text);font-family:var(--font-display);letter-spacing:-.01em}
+.dev-name span{display:block;font-family:var(--mono);font-size:12px;color:var(--dim);font-weight:400;
+               letter-spacing:0;margin-top:5px}
+.dev p{font-size:14.5px}
+@media (max-width:760px){
+  .dev{grid-template-columns:22px minmax(0,1fr);gap:14px}
+  .dev p{grid-column:2}
+}
+.dev-foot{margin-top:26px;font-size:14.5px}
+.dev-foot a{color:var(--green);font-weight:500;border-bottom:1px solid rgba(74,222,128,.35)}
+
+/* ---------- signals / terminal ---------- */
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:clamp(32px,5vw,64px);align-items:start}
+@media (max-width:900px){ .split{grid-template-columns:1fr} }
+.srcs{display:flex;flex-direction:column}
+.src{padding:18px 0;border-top:1px solid var(--border)}
+.src:last-child{border-bottom:1px solid var(--border)}
+.src b{font-family:var(--font-display);font-size:16px;font-weight:600;letter-spacing:-.01em}
+.src p{font-size:14px;margin-top:5px}
+.term{background:#080a0e;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;
+      box-shadow:var(--shadow)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:12px 15px;border-bottom:1px solid var(--border);
+          background:var(--bg-2)}
+.term-bar i{width:10px;height:10px;border-radius:50%;background:var(--panel-3);display:block}
+.term-bar i:nth-child(1){background:rgba(248,113,113,.55)}
+.term-bar i:nth-child(2){background:rgba(251,191,36,.55)}
+.term-bar i:nth-child(3){background:rgba(74,222,128,.55)}
+.term-bar span{margin-left:8px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.term pre{margin:0;padding:20px 18px;overflow-x:auto;font-family:var(--mono);font-size:13.5px;line-height:1.85}
+.term .c{color:var(--dim)}
+.term .p{color:var(--green)}
+.term .o{color:var(--muted)}
+
+/* ---------- flow: the pipeline, one line long ---------- */
+.flowcard{border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2);
+          padding:clamp(24px,3.4vw,36px)}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:12px;font-family:var(--mono)}
+.fnode{flex:1 1 150px;border:1px solid var(--border-2);border-radius:10px;padding:13px 15px;background:var(--panel)}
+.fnode b{display:block;font-size:13.5px;font-weight:600;color:var(--text);letter-spacing:.02em}
+.fnode small{display:block;font-size:11.5px;color:var(--dim);margin-top:4px;line-height:1.6}
+.farrow{align-self:center;color:var(--dim);font-size:15px;user-select:none}
+.flowcard p{margin-top:20px;font-size:14.5px}
+.flowcard a{color:var(--green);font-weight:500;border-bottom:1px solid rgba(74,222,128,.35)}
+
+/* ---------- rule ---------- */
+.rulecard{border:1px solid var(--border);border-radius:var(--radius);
+          background:linear-gradient(180deg,var(--bg-2),var(--bg));padding:28px 26px}
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-family:var(--mono);font-size:13.5px}
+.chips .kw{color:var(--dim);letter-spacing:.06em}
+.chip{border:1px solid var(--border-2);border-radius:8px;padding:6px 11px;background:var(--panel);color:var(--text)}
+.chip.ev{color:var(--blue)}
+.chip.fx{display:inline-flex;align-items:center;gap:8px}
+.chip.fx i{width:8px;height:8px;border-radius:50%;display:block}
+.rulecard p{margin-top:18px;font-size:14.5px}
+
+/* ---------- shots ---------- */
+.shot{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-2);
+      box-shadow:var(--shadow);transition:transform .25s ease,border-color .25s ease}
+@media (hover:hover){ .shot:hover{transform:translateY(-3px);border-color:var(--border-2)} }
+.shot img{display:block;width:100%;height:auto}
+.shot figcaption{padding:13px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--dim);
+                 font-family:var(--mono)}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:26px}
+@media (max-width:760px){ .shots{grid-template-columns:1fr} }
+
+/* ---------- local ---------- */
+.local{border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+       background:linear-gradient(180deg,var(--bg-2),var(--bg))}
+.local h2{max-width:18ch}
+.local .lead{margin-top:18px}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:26px;margin-top:44px}
+@media (max-width:760px){ .facts{grid-template-columns:1fr;gap:22px} }
+.fact b{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:15px;
+        font-weight:600;margin-bottom:8px;color:var(--text)}
+.fact b svg{width:18px;height:18px;flex:none;fill:none;stroke:var(--green);stroke-width:1.7;
+            stroke-linecap:round;stroke-linejoin:round}
+.fact p{font-size:14px}
+
+/* ---------- install ---------- */
+.install{text-align:center}
+.install h2{margin-bottom:18px}
+.install .lead{margin:0 auto 40px;max-width:50ch}
+.inst{max-width:780px;margin:0 auto;text-align:left;border:1px solid var(--border);
+      border-radius:var(--radius);background:var(--bg-2);padding:6px clamp(16px,3vw,28px)}
+.irow{display:flex;align-items:center;gap:20px;padding:16px 0;border-top:1px solid var(--border)}
+.irow:first-child{border-top:0}
+.irow .os{flex:none;width:118px;font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;
+          text-transform:uppercase;color:var(--dim)}
+.irow .cmd{display:flex;width:100%;margin:0}
+.irow .cmd code{flex:1}
+@media (max-width:760px){
+  .irow{flex-direction:column;align-items:stretch;gap:10px}
+  .irow .os{width:auto}
+}
+.install .fine{margin-top:26px;font-size:13.5px;color:var(--dim);max-width:64ch;margin-left:auto;margin-right:auto}
+.install .fine a{color:var(--green)}
+.install .fine code{font-family:var(--mono)}
+
+/* ---------- footer ---------- */
+footer{border-top:1px solid var(--border);padding:52px 0 40px}
+.foot-grid{display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between;align-items:flex-start}
+.foot-brand{max-width:36ch}
+.foot-brand img{height:24px;width:auto;opacity:.8;margin-bottom:14px;display:block}
+.foot-brand p{font-size:13.5px}
+.foot-links{display:flex;gap:clamp(36px,6vw,72px);flex-wrap:wrap}
+.foot-links b{display:block;font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.1em;
+              text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+.foot-links a{display:block;color:var(--muted);font-size:14px;padding:3px 0}
+.foot-links a:hover{color:var(--text)}
+.foot-base{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;margin-top:40px;
+           padding-top:20px;border-top:1px solid var(--border);
+           font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+
+/* ---------- reveal ---------- */
+.rv{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.22,.61,.36,1),transform .7s cubic-bezier(.22,.61,.36,1)}
+.rv.in{opacity:1;transform:none}
+/* children of a revealed group enter one beat apart */
+.rv .state,.rv .fact,.rv .stat{opacity:0;transform:translateY(14px);
+  transition:opacity .6s ease,transform .6s cubic-bezier(.22,.61,.36,1)}
+.rv.in .state,.rv.in .fact,.rv.in .stat{opacity:1;transform:none}
+.rv.in .state:nth-child(2),.rv.in .fact:nth-child(2),.rv.in .stat:nth-child(2){transition-delay:.07s}
+.rv.in .state:nth-child(3),.rv.in .fact:nth-child(3),.rv.in .stat:nth-child(3){transition-delay:.14s}
+.rv.in .stat:nth-child(4){transition-delay:.21s}
+
+/* Lumen ships a "reduce flashing" setting; the site keeps the same promise. */
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
+  .rv,.rv .state,.rv .fact,.rv .stat{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#top">Skip to content</a>
+
+<header class="nav" id="nav">
+  <nav class="wrap nav-in" aria-label="Primary">
+    <a class="logo" href="#top">
+      <img src="brand/svg/lumen-logo-white.svg" alt="Lumen" width="130" height="26">
+      <span class="ver">v0.3.1</span>
+    </a>
+    <a class="link" href="#devices">Devices</a>
+    <a class="link" href="#signals">Signals</a>
+    <a class="link" href="#automations">Automations</a>
+    <a class="link" href="#install">Install</a>
+    <a class="link" href="https://github.com/Brxerq/lumen/tree/main/docs">Docs</a>
+    <a class="ghost" href="https://github.com/Brxerq/lumen">GitHub</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <!-- ============ hero ============ -->
+  <div class="hero wrap">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">Local daemon · Windows, macOS, Linux</p>
+        <h1>Something happens on your computer.<br><em>The devices around you react.</em></h1>
+        <p class="lead">Your coding agent needs an answer. A build fails. A twenty-minute
+          command finally ends. Lumen turns those moments into light you can see without
+          looking — on the keyboard, the light bar, the lamp behind your monitor, the edge
+          of the screen, or just a notification and a sound.</p>
+
+        <div class="cmd"><span class="dollar" id="cmd-sigil">$</span><code id="cmd-text">curl -fsSL https://brxerq.github.io/lumen/install.sh | sh</code><button id="copy" type="button">copy</button></div>
+        <p class="hero-alt">No Python needed · <a href="#install">every install option</a> · first run opens the dashboard</p>
+
+        <div class="badges">
+          <span class="badge">no accounts</span>
+          <span class="badge">no cloud</span>
+          <span class="badge">no telemetry</span>
+          <span class="badge">works on a MacBook</span>
+          <span class="badge">MIT</span>
+        </div>
+      </div>
+
+      <!-- The brand mark, driven by the app's own status palette. -->
+      <div class="stage">
+        <span class="tag" aria-hidden="true"><i></i>live demo</span>
+        <svg class="mark" viewBox="0 0 320 320" role="img" aria-labelledby="mark-t">
+          <title id="mark-t">The Lumen mark, cycling the three agent states</title>
+          <g transform="translate(76 13)">
+            <path class="shell" d="M 84,0 C 130.392,0 168,37.608 168,84 L 168,210 C 168,256.392 130.392,294 84,294 C 37.608,294 0,256.392 0,210 L 0,84 C 0,37.608 37.608,0 84,0 Z"/>
+            <path class="field" id="f-top" fill="#4ade80" d="M 84,30 C 117.3,30 138,50.4 138,82 L 138,103 C 138,133.6 121.7,145 84,145 C 46.3,145 30,133.6 30,103 L 30,82 C 30,50.4 50.7,30 84,30 Z"/>
+            <path class="field" id="f-bot" fill="#4ade80" d="M 84,158 C 122.2,158 138,171.6 138,201 L 138,210 C 138,242.2 117.1,264 84,264 C 50.9,264 30,242.2 30,210 L 30,201 C 30,171.6 45.8,158 84,158 Z"/>
+          </g>
+        </svg>
+        <p class="stage-cap"><span class="dot" id="stage-dot"></span><span class="txt" id="stage-label">All agents idle</span> <span class="ev txt" id="stage-ev">agents.status</span></p>
+        <p class="stage-foot">Top field: keyboard zones. Bottom field: light bar. Same two
+          surfaces the daemon drives on real hardware.</p>
+      </div>
+    </div>
+
+    <div class="stats rv">
+      <div class="stat"><b>9</b><span>device adapters</span></div>
+      <div class="stat"><b>5</b><span>event sources</span></div>
+      <div class="stat"><b>3</b><span>platforms, one binary</span></div>
+      <div class="stat"><b>0</b><span>accounts · cloud · telemetry</span></div>
+    </div>
+  </div>
+
+  <!-- ============ states ============ -->
+  <section class="wrap" id="states" style="padding-top:clamp(32px,5vw,64px)">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">01</span>The default rules</p>
+      <h2>Three colors, one glance.</h2>
+      <p class="lead">A fresh install mirrors your agents' overall status on every light it
+        finds. Nothing to configure before it is useful.</p>
+    </div>
+    <div class="states rv">
+      <div class="state" style="--accent:var(--red)">
+        <div class="swatch"></div>
+        <h3>Red — waiting on you</h3>
+        <p>An agent asked a question or hit a permission prompt and stopped.</p>
+        <p><code>agents.status · input</code></p>
+      </div>
+      <div class="state" style="--accent:var(--amber)">
+        <div class="swatch"></div>
+        <h3>Amber — working</h3>
+        <p>At least one agent is running. Leave it alone; it does not need you.</p>
+        <p><code>agents.status · running</code></p>
+      </div>
+      <div class="state" style="--accent:var(--green)">
+        <div class="swatch"></div>
+        <h3>Green — idle</h3>
+        <p>Everything finished. A completed task also flashes green twice.</p>
+        <p><code>agents.status · done</code></p>
+      </div>
+    </div>
+    <p class="dev-foot rv">On a keyboard or light bar with zones, one zone becomes one agent
+      tab, so ten Claude Code windows are ten separate lights instead of one summary.</p>
+  </section>
+
+  <!-- ============ how it looks on your machine ============ -->
+  <section class="wrap" id="how">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">02</span>On your machine</p>
+      <h2>The same event, on whatever you own.</h2>
+      <p class="lead">Lumen asks each device what it can do and picks the best way to say it.
+        Four zones become four agent tabs. A per-key board gives every tab its own key. A
+        MacBook with nothing to light gets the screen edge, a notification and a sound.
+        Here is one scenario playing out on each.</p>
+    </div>
+
+    <div class="rv">
+      <div class="tabs" role="tablist" aria-label="Kind of hardware">
+        <button role="tab" id="tab-zones" aria-controls="rig-zones" aria-selected="true" data-rig="zones">Zone keyboard</button>
+        <button role="tab" id="tab-mac" aria-controls="rig-mac" aria-selected="false" data-rig="mac">MacBook &amp; no RGB</button>
+        <button role="tab" id="tab-keys" aria-controls="rig-keys" aria-selected="false" data-rig="keys">Per-key keyboard</button>
+      </div>
+
+      <div class="rig">
+        <div>
+          <!-- ---- zone keyboard: four framed zones of real keys plus a light bar ---- -->
+          <div id="rig-zones" role="tabpanel" aria-labelledby="tab-zones">
+            <svg viewBox="0 0 560 282" role="img" aria-labelledby="t-zones">
+              <title id="t-zones">A four-zone laptop keyboard and its light bar, each zone showing one agent tab</title>
+              <rect class="plate" x="10" y="8" width="540" height="196" rx="16"/>
+              <g id="zones">
+                <defs>
+                  <clipPath id="k3"><rect x="124.0" y="18" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k7"><rect x="262.7" y="18" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k11"><rect x="401.3" y="18" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k17"><rect x="141.3" y="55" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k24"><rect x="384.0" y="55" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k34"><rect x="254.0" y="92" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k38"><rect x="392.7" y="92" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k43"><rect x="132.7" y="129" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k47"><rect x="271.3" y="129" width="29.7" height="28" rx="6"/></clipPath>
+                  <clipPath id="k57"><rect x="193.3" y="166" width="220.3" height="28" rx="6"/></clipPath>
+                </defs>
+                <g data-zone="0">
+                  <rect class="zkey" x="20.0" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="54.7" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="89.3" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k3)" x="124.0" y="18" width="26.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="20.0" y="55" width="47.0" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="72.0" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="106.7" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k17)" x="141.3" y="55" width="8.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="20.0" y="92" width="55.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="80.7" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="115.3" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="20.0" y="129" width="73.0" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="98.0" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k43)" x="132.7" y="129" width="17.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="20.0" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="63.3" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="106.7" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                </g>
+                <g data-zone="1">
+                  <rect class="zkey" clip-path="url(#k3)" x="150.0" y="18" width="3.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="158.7" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="193.3" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="228.0" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k7)" x="262.7" y="18" width="17.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k17)" x="150.0" y="55" width="21.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="176.0" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="210.7" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="245.3" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="150.0" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="184.7" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="219.3" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k34)" x="254.0" y="92" width="26.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k43)" x="150.0" y="129" width="12.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="167.3" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="202.0" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="236.7" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k47)" x="271.3" y="129" width="8.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="150.0" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k57)" x="193.3" y="166" width="86.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                </g>
+                <g data-zone="2">
+                  <rect class="zkey" clip-path="url(#k7)" x="280.0" y="18" width="12.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="297.3" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="332.0" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="366.7" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k11)" x="401.3" y="18" width="8.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="280.0" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="314.7" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="349.3" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k24)" x="384.0" y="55" width="26.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k34)" x="280.0" y="92" width="3.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="288.7" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="323.3" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="358.0" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k38)" x="392.7" y="92" width="17.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k47)" x="280.0" y="129" width="21.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="306.0" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="340.7" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="375.3" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k57)" x="280.0" y="166" width="130.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                </g>
+                <g data-zone="3">
+                  <rect class="zkey" clip-path="url(#k11)" x="410.0" y="18" width="21.0" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="436.0" y="18" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="470.7" y="18" width="64.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k24)" x="410.0" y="55" width="3.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="418.7" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="453.3" y="55" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="488.0" y="55" width="47.0" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k38)" x="410.0" y="92" width="12.3" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="427.3" y="92" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="462.0" y="92" width="73.0" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="410.0" y="129" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="444.7" y="129" width="90.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" clip-path="url(#k57)" x="410.0" y="166" width="3.7" height="28" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="418.7" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="462.0" y="166" width="38.3" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                  <rect class="zkey" x="505.3" y="166" width="29.7" height="28" rx="6" fill="#1a1e27" stroke="#262c38"/>
+                </g>
+              </g>
+              <text class="caplabel" x="85" y="222" text-anchor="middle">zone 1</text>
+              <text class="caplabel" x="215" y="222" text-anchor="middle">zone 2</text>
+              <text class="caplabel" x="345" y="222" text-anchor="middle">zone 3</text>
+              <text class="caplabel" x="475" y="222" text-anchor="middle">zone 4</text>
+              <rect class="seg" data-bar="0" x="19" y="242" width="258" height="10" rx="5"/>
+              <rect class="seg" data-bar="1" x="283" y="242" width="258" height="10" rx="5"/>
+              <text class="caplabel" x="19" y="270" style="font-size:11px">light bar, folded to one overall status</text>
+            </svg>
+          </div>
+
+          <!-- ---- MacBook: screen edge glow, notification, sound ---- -->
+          <div id="rig-mac" role="tabpanel" aria-labelledby="tab-mac" hidden>
+            <svg viewBox="0 0 560 284" role="img" aria-labelledby="t-mac">
+              <title id="t-mac">A laptop with no RGB: the edge of the screen glows and a notification appears</title>
+              <rect class="plate" x="96" y="14" width="368" height="212" rx="12"/>
+              <rect class="glowline" data-edge="1" x="108" y="26" width="344" height="188" rx="7"
+                    fill="none" stroke="#fbbf24" stroke-width="5"/>
+              <g class="screenmock">
+                <rect x="128" y="48" width="120" height="9" rx="4.5"/>
+                <rect x="128" y="68" width="196" height="9" rx="4.5"/>
+                <rect x="128" y="88" width="158" height="9" rx="4.5"/>
+                <rect x="128" y="120" width="210" height="9" rx="4.5"/>
+                <rect x="128" y="140" width="138" height="9" rx="4.5"/>
+                <rect x="128" y="160" width="182" height="9" rx="4.5"/>
+              </g>
+              <g class="toast off" data-toast="1" transform="translate(266 44)">
+                <rect width="170" height="54" rx="10" fill="#20242e" stroke="#3a4150" stroke-width="1.5"/>
+                <circle data-toastdot="1" cx="23" cy="27" r="7" fill="#4ade80"/>
+                <rect x="42" y="16" width="98" height="8" rx="4" fill="#c8ccd6"/>
+                <rect x="42" y="31" width="66" height="7" rx="3.5" fill="#767d8c"/>
+              </g>
+              <path d="M132 240 h296 l26 22 h-348 z" fill="#12141a" stroke="#343a47" stroke-width="2"/>
+              <rect class="seg" data-bar="0" x="176" y="232" width="208" height="6" rx="3" opacity=".5"/>
+              <g>
+                <path d="M474 130 v22 h14 l16 13 v-48 l-16 13 z" fill="#767d8c"/>
+                <path class="glowline" data-edge="1" d="M512 132 a10 10 0 0 1 0 18" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/>
+                <path class="glowline" data-edge="1" d="M522 124 a20 20 0 0 1 0 34" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round" opacity=".5"/>
+              </g>
+              <text class="caplabel" x="108" y="280" style="font-size:11px">screen edge glow, native notification, sound</text>
+            </svg>
+          </div>
+
+          <!-- ---- per-key: a full board, one labeled key per agent tab ---- -->
+          <div id="rig-keys" role="tabpanel" aria-labelledby="tab-keys" hidden>
+            <svg viewBox="0 0 560 276" role="img" aria-labelledby="t-keys">
+              <title id="t-keys">A per-key keyboard with one lit key per agent tab</title>
+              <rect class="plate" x="10" y="8" width="540" height="232" rx="16"/>
+              <text class="caplabel" x="24" y="28" style="font-size:11px">one key per agent tab &#183; 1 to 0</text>
+              <g id="keycaps">
+                <g data-key="0"><rect class="keycap" x="24" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="46" y="68" fill="#525a6b">1</text></g>
+                <g data-key="1"><rect class="keycap" x="76" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="98" y="68" fill="#525a6b">2</text></g>
+                <g data-key="2"><rect class="keycap" x="128" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="150" y="68" fill="#525a6b">3</text></g>
+                <g data-key="3"><rect class="keycap" x="180" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="202" y="68" fill="#525a6b">4</text></g>
+                <g data-key="4"><rect class="keycap" x="232" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="254" y="68" fill="#525a6b">5</text></g>
+                <g data-key="5"><rect class="keycap" x="284" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="306" y="68" fill="#525a6b">6</text></g>
+                <g data-key="6"><rect class="keycap" x="336" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="358" y="68" fill="#525a6b">7</text></g>
+                <g data-key="7"><rect class="keycap" x="388" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="410" y="68" fill="#525a6b">8</text></g>
+                <g data-key="8"><rect class="keycap" x="440" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="462" y="68" fill="#525a6b">9</text></g>
+                <g data-key="9"><rect class="keycap" x="492" y="40" width="44" height="44" rx="9" fill="#191d26" stroke="#2b313d" stroke-width="2"/><text class="ktxt" x="514" y="68" fill="#525a6b">0</text></g>
+              </g>
+              <g>
+                <rect class="dimkey" x="31" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="73" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="115" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="157" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="199" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="241" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="283" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="325" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="367" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="409" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="451" y="100" width="36" height="26" rx="6"/><rect class="dimkey" x="493" y="100" width="36" height="26" rx="6"/>
+                <rect class="dimkey" x="31" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="73" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="115" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="157" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="199" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="241" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="283" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="325" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="367" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="409" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="451" y="134" width="36" height="26" rx="6"/><rect class="dimkey" x="493" y="134" width="36" height="26" rx="6"/>
+                <rect class="dimkey" x="31" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="73" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="115" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="157" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="199" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="241" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="283" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="325" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="367" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="409" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="451" y="168" width="36" height="26" rx="6"/><rect class="dimkey" x="493" y="168" width="36" height="26" rx="6"/>
+                <rect class="dimkey" x="31" y="202" width="36" height="26" rx="6"/><rect class="dimkey" x="73" y="202" width="36" height="26" rx="6"/><rect class="dimkey" x="115" y="202" width="36" height="26" rx="6"/>
+                <rect class="dimkey" x="157" y="202" width="246" height="26" rx="6"/>
+                <rect class="dimkey" x="409" y="202" width="36" height="26" rx="6"/><rect class="dimkey" x="451" y="202" width="36" height="26" rx="6"/><rect class="dimkey" x="493" y="202" width="36" height="26" rx="6"/>
+              </g>
+              <text class="caplabel" x="24" y="262" style="font-size:11px">the rest of the board keeps your own profile</text>
+            </svg>
+          </div>
+
+          <p class="readout" id="readout">
+            <span class="dot" id="rd-dot"></span>
+            <span class="txt" id="rd-say">Two agents working</span>
+            <span class="ev txt" id="rd-ev">agents.status &#183; running</span>
+          </p>
+        </div>
+
+        <div class="rig-note">
+          <div data-note="zones">
+            <h3>Sections, not single keys</h3>
+            <p>Most laptop boards light in blocks rather than per key. Lumen gives one block
+              to one agent tab, so a glance down the keyboard says which window is waiting.
+              The light bar underneath folds all of them into one overall color.</p>
+            <p class="kit">asus_aura &#183; openrgb<br>ASUS Aura laptops &#183; zoned boards &#183; strips &#183; fans</p>
+          </div>
+          <div data-note="mac" hidden>
+            <h3>No RGB? It still works.</h3>
+            <p>On a MacBook &mdash; or any machine with nothing to light &mdash; Lumen draws a
+              thin always-on-top glow around the edge of the screen, posts a native
+              notification when a task lands, and plays a sound. On a MacBook the keyboard
+              backlight pulses too. Nothing to buy, nothing to plug in.</p>
+            <p class="kit">screen &#183; notification &#183; sound &#183; mac_backlight &#183; linux_backlight<br>macOS &#183; Windows &#183; Linux</p>
+          </div>
+          <div data-note="keys" hidden>
+            <h3>One key, one agent</h3>
+            <p>Where the hardware addresses single keys, every agent tab gets its own &mdash;
+              up to ten. Choose the keys in the dashboard; the rest of the board is left
+              alone, so your own lighting profile survives.</p>
+            <p class="kit">openrgb &#183; per-key<br>Razer &#183; Corsair &#183; Logitech &#183; SteelSeries &#183; MSI</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ devices ============ -->
+  <section class="wrap" id="devices">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">03</span>Hardware</p>
+      <h2>It uses what you already own.</h2>
+      <p class="lead">Plug in, scan, done — Lumen detects devices and learns what each one
+        can do. Effects degrade honestly: a flash on a brightness-only backlight becomes a
+        blink, a wave on a single-zone lamp becomes a pulse.</p>
+    </div>
+    <div class="rv">
+      <div class="dev">
+        <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>
+        <div class="dev-name">ASUS Aura laptops<span>asus_aura · color, zones</span></div>
+        <p>ROG, TUF and Zephyrus machines that speak Aura Core: keyboard zones and the light
+          bar over raw HID, no vendor software running in the background. Verified on the ROG
+          Strix G513RM; other Aura Core models are detected and marked unverified.</p>
+      </div>
+      <div class="dev">
+        <svg viewBox="0 0 24 24"><path d="M3 12c3-4 6-4 9 0s6 4 9 0"/><path d="M6 8v1M12 6v1M18 8v1M6 16v1M12 18v1M18 16v1"/></svg>
+        <div class="dev-name">Everything OpenRGB drives<span>openrgb · color, zones, per-key</span></div>
+        <p>Most other RGB laptops and boards: Razer, Corsair, Logitech, SteelSeries, MSI,
+          HyperX, Gigabyte, plus RAM, fans and strips. Enable the OpenRGB SDK server once;
+          Lumen starts it for you when it is installed but idle.</p>
+      </div>
+      <div class="dev">
+        <svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z"/></svg>
+        <div class="dev-name">Philips Hue &amp; Govee<span>hue, govee · color, brightness</span></div>
+        <p>The Hue bridge is found automatically and the previous light state is restored
+          after an effect. Govee runs on its LAN API — turn on LAN Control in the app, no
+          cloud key.</p>
+      </div>
+      <div class="dev">
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        <div class="dev-name">No RGB at all<span>screen, notification, sound</span></div>
+        <p>A plain laptop still gets a thin always-on-top glow at the edge of the screen, a
+          native notification, and a sound. Keyboard backlights pulse too: MacBooks through
+          CoreBrightness, Linux laptops through <code>/sys/class/leds</code>.</p>
+      </div>
+    </div>
+    <p class="dev-foot rv">Missing your hardware? An adapter is one small Python module —
+      most are under 100 lines. <a href="https://github.com/Brxerq/lumen/blob/main/docs/PLUGINS.md">Read the plugin guide →</a></p>
+  </section>
+
+  <!-- ============ signals ============ -->
+  <section class="wrap" id="signals">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">04</span>Events</p>
+      <h2>Where the signals come from.</h2>
+      <p class="lead">Agents get first-class hooks with a hook-free fallback. Everything else
+        is one command or one POST away.</p>
+    </div>
+    <div class="split">
+      <div class="srcs rv">
+        <div class="src"><b>Claude Code</b><p>CLI, VS Code, Cursor, JetBrains and desktop. One-click hook install, plus a transcript fallback when hooks are unavailable.</p></div>
+        <div class="src"><b>Codex</b><p>CLI, VS Code and desktop, with the same hook install and a rollout fallback.</p></div>
+        <div class="src"><b>GitHub Actions</b><p>Polls <code>gh run list</code> for the repositories you pick and reports success or failure.</p></div>
+        <div class="src"><b>Terminal &amp; scripts</b><p>Wrap a slow command, fire a custom event, or run a timer.</p></div>
+        <div class="src"><b>Webhook</b><p>A local endpoint for anything else that can send JSON.</p></div>
+      </div>
+      <div class="term rv">
+        <div class="term-bar"><i></i><i></i><i></i><span>~/work</span></div>
+<pre><span class="c"># tell me how the build ended</span>
+<span class="p">$</span> lumen exec -- npm run build
+<span class="o">command.succeeded · flash green ×2</span>
+
+<span class="c"># any event you like</span>
+<span class="p">$</span> lumen emit deploy.succeeded --data name=api
+
+<span class="c"># a pomodoro that ends in light</span>
+<span class="p">$</span> lumen timer 25m --name pomodoro
+
+<span class="c"># or from anything that speaks HTTP</span>
+<span class="p">$</span> curl -X POST localhost:6733/api/events \
+    -d '{"type":"build.failed","data":{"name":"web"}}'</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ flow ============ -->
+  <section class="wrap" id="flow" style="padding-top:0">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">05</span>Under the hood</p>
+      <h2>One small pipeline.</h2>
+      <p class="lead">Every source emits the same kind of event and every rule reads the same
+        bus, so adding an integration or a device adapter never touches the core.</p>
+    </div>
+    <div class="flowcard rv">
+      <div class="flow">
+        <div class="fnode"><b>integrations</b><small>claude · codex · github<br>terminal · webhook</small></div>
+        <span class="farrow" aria-hidden="true">→</span>
+        <div class="fnode"><b>EventBus</b><small>typed events<br>+ activity log</small></div>
+        <span class="farrow" aria-hidden="true">→</span>
+        <div class="fnode"><b>rules</b><small>WHEN event<br>THEN actions</small></div>
+        <span class="farrow" aria-hidden="true">→</span>
+        <div class="fnode"><b>devices</b><small>keyboard · light bar<br>screen · lights</small></div>
+      </div>
+      <p>Transient effects layer over a base color at 30 fps, and the hardware is only
+        written to when something actually changes.
+        <a href="https://github.com/Brxerq/lumen/blob/main/docs/ARCHITECTURE.md">Read the architecture notes →</a></p>
+    </div>
+  </section>
+
+  <!-- ============ automations ============ -->
+  <section class="wrap" id="automations" style="padding-top:0">
+    <div class="sec-head rv">
+      <p class="eyebrow"><span class="num">06</span>Automations</p>
+      <h2>Rules you can read out loud.</h2>
+      <p class="lead">Every automation is one sentence: when this event arrives — optionally
+        filtered on its data — do these things. Built in a visual editor, stored as plain
+        JSON, no config file to learn.</p>
+    </div>
+    <div class="rulecard rv">
+      <div class="chips">
+        <span class="kw">WHEN</span>
+        <span class="chip ev">agent.finished</span>
+        <span class="kw">THEN</span>
+        <span class="chip fx"><i style="background:var(--green)"></i>keyboard · flash green ×2</span>
+        <span class="kw">AND</span>
+        <span class="chip fx"><i style="background:var(--panel-3)"></i>notification</span>
+      </div>
+      <p>Actions target one device or every compatible device at once. Set color and turn off
+        persist; flash, pulse and wave play for a few seconds and hand the base color back.
+        <strong style="color:var(--text);font-weight:500">Reduce flashing</strong> in Settings turns
+        every flash into a smooth pulse no faster than 2 Hz.</p>
+    </div>
+    <div class="shots">
+      <figure class="shot rv"><img src="screenshots/devices.png" alt="The Devices page listing detected hardware and its capabilities" loading="lazy" width="1280" height="860"><figcaption>Devices — detected, tested, capability-tagged</figcaption></figure>
+      <figure class="shot rv"><img src="screenshots/automations.png" alt="The Automations page showing the visual rule builder" loading="lazy" width="1280" height="860"><figcaption>Automations — the rule builder</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ============ local ============ -->
+  <section class="local">
+    <div class="wrap">
+      <div class="sec-head rv" style="margin-bottom:0">
+        <p class="eyebrow"><span class="num">07</span>Privacy</p>
+        <h2>It never leaves the machine.</h2>
+        <p class="lead">Lumen is a tray daemon with a dashboard on <code>127.0.0.1:6733</code>.
+          There is no account to make and no server to trust, because there is no server.</p>
+      </div>
+      <div class="facts rv">
+        <div class="fact"><b><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>Loopback only</b><p>The local API refuses cross-origin and DNS-rebound requests. Being on localhost was never meant to be the whole defence.</p></div>
+        <div class="fact"><b><svg viewBox="0 0 24 24"><path d="M6 18a4 4 0 0 1 0-8 5.5 5.5 0 0 1 10.7-1.5A4.5 4.5 0 0 1 18 18z"/><path d="M4 4l16 16"/></svg>No outbound calls</b><p>The dashboard loads nothing from the internet — fonts included. Lumen leaves your network only on a button you pressed: the update check, and Philips' bridge lookup if pairing a Hue finds none on your own LAN. Discovery and every light stay local.</p></div>
+        <div class="fact"><b><svg viewBox="0 0 24 24"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>Yours to read</b><p>A few thousand lines of Python and one static dashboard, MIT licensed, tested on Windows, macOS and Linux in CI.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ install ============ -->
+  <section class="wrap install" id="install">
+    <div class="rv">
+      <p class="eyebrow"><span class="num">08</span>Get started</p>
+      <h2>Two minutes to the first flash.</h2>
+      <p class="lead">Install, run, and the dashboard walks you through it: scan for hardware,
+        test each device, connect your agents, pick what a finished task looks like.</p>
+      <div class="inst">
+        <div class="irow">
+          <span class="os">macOS · Linux</span>
+          <div class="cmd"><span class="dollar">$</span><code>curl -fsSL https://brxerq.github.io/lumen/install.sh | sh</code><button class="copy2" type="button" data-cmd="curl -fsSL https://brxerq.github.io/lumen/install.sh | sh">copy</button></div>
+        </div>
+        <div class="irow">
+          <span class="os">Windows</span>
+          <div class="cmd"><span class="dollar">&gt;</span><code>irm https://brxerq.github.io/lumen/install.ps1 | iex</code><button class="copy2" type="button" data-cmd="irm https://brxerq.github.io/lumen/install.ps1 | iex">copy</button></div>
+        </div>
+        <div class="irow">
+          <span class="os">Then</span>
+          <div class="cmd"><span class="dollar">$</span><code>lumen</code><button class="copy2" type="button" data-cmd="lumen">copy</button></div>
+        </div>
+      </div>
+      <p class="fine">Each line downloads the build for your platform from the
+        <a href="https://github.com/Brxerq/lumen/releases/latest">latest release</a>,
+        checks it against the published SHA-256 and refuses to install anything that does not match.
+        After that Lumen updates itself from Settings → About.<br>
+        Have Python 3.11+ and prefer to build from source?
+        <code>pip install git+https://github.com/Brxerq/lumen</code>.
+        Not from PyPI — the name <code>lumen</code> there belongs to an
+        unrelated project.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <img src="brand/svg/lumen-logo-white.svg" alt="Lumen">
+        <p>Something happens on your computer — the devices around you react.
+          A local daemon for Windows, macOS and Linux.</p>
+      </div>
+      <div class="foot-links">
+        <div>
+          <b>Project</b>
+          <a href="https://github.com/Brxerq/lumen">GitHub</a>
+          <a href="https://github.com/Brxerq/lumen/releases/latest">Releases</a>
+          <a href="https://github.com/Brxerq/lumen/tree/main/docs">Docs</a>
+        </div>
+        <div>
+          <b>Extend</b>
+          <a href="https://github.com/Brxerq/lumen/blob/main/docs/PLUGINS.md">Plugin guide</a>
+          <a href="https://github.com/Brxerq/lumen/blob/main/docs/API.md">Local API</a>
+          <a href="https://openrgb.org">OpenRGB</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-base">
+      <span>MIT licensed</span>
+      <span>v0.3.1 · no cloud, no telemetry</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- nav hairline appears once the page has moved ----
+  var nav = document.getElementById("nav");
+  var onScroll = function () { nav.classList.toggle("stuck", window.scrollY > 8); };
+  onScroll();
+  window.addEventListener("scroll", onScroll, { passive: true });
+
+  // ---- scroll-spy: the nav dot marks the section you are reading ----
+  var spyLinks = {};
+  [].forEach.call(document.querySelectorAll(".nav a.link[href^='#']"), function (a) {
+    var id = a.getAttribute("href").slice(1);
+    if (document.getElementById(id)) spyLinks[id] = a;
+  });
+  var spyIds = Object.keys(spyLinks);
+  if (spyIds.length && "IntersectionObserver" in window) {
+    var visible = {};
+    var spyIO = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      // The middle band can hold two sections; the lower one is the one being read.
+      var active = null;
+      spyIds.forEach(function (id) { if (visible[id]) active = id; });
+      spyIds.forEach(function (id) {
+        var on = id === active;
+        spyLinks[id].classList.toggle("on", on);
+        if (on) spyLinks[id].setAttribute("aria-current", "true");
+        else spyLinks[id].removeAttribute("aria-current");
+      });
+    }, { rootMargin: "-30% 0px -60% 0px" });
+    spyIds.forEach(function (id) { spyIO.observe(document.getElementById(id)); });
+  }
+
+  // ---- reveal on entry; without IntersectionObserver everything is simply visible ----
+  var rv = [].slice.call(document.querySelectorAll(".rv"));
+  if (reduce || !("IntersectionObserver" in window)) {
+    rv.forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -12% 0px", threshold: 0.08 });
+    rv.forEach(function (el) { io.observe(el); });
+    // Landing on a #hash scrolls after the observer's first pass, so the target
+    // section can sit at opacity 0 until the reader happens to scroll. Sweep once
+    // the page has settled and reveal whatever is already on screen.
+    window.addEventListener("load", function () {
+      rv.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) { el.classList.add("in"); io.unobserve(el); }
+      });
+    });
+  }
+
+  // ---- the mark cycles the real default palette (core/rules.py DEFAULT_PALETTE) ----
+  var CYCLE = [
+    { top: "#f87171", bot: "#f87171", label: "Agent needs you", ev: "agents.status · input" },
+    { top: "#fbbf24", bot: "#f87171", label: "Claude working, Codex waiting", ev: "agents.sessions" },
+    { top: "#fbbf24", bot: "#fbbf24", label: "Agents working", ev: "agents.status · running" },
+    { top: "#4ade80", bot: "#fbbf24", label: "Claude finished", ev: "agent.finished" },
+    { top: "#4ade80", bot: "#4ade80", label: "All agents idle", ev: "agents.status · done" }
+  ];
+  var top = document.getElementById("f-top"), bot = document.getElementById("f-bot");
+  var cap = document.querySelector(".stage-cap");
+  var dot = document.getElementById("stage-dot"), label = document.getElementById("stage-label"),
+      ev = document.getElementById("stage-ev");
+  var i = CYCLE.length - 1;
+  function light(s) {
+    top.setAttribute("fill", s.top);
+    bot.setAttribute("fill", s.bot);
+    top.style.filter = "drop-shadow(0 0 18px " + s.top + "66)";
+    bot.style.filter = "drop-shadow(0 0 18px " + s.bot + "66)";
+    dot.style.background = s.bot;
+    dot.style.boxShadow = "0 0 10px " + s.bot;
+  }
+  function words(s) { label.textContent = s.label; ev.textContent = s.ev; }
+  // The fill eases over .5s. The caption fades out, is rewritten at the midpoint
+  // and fades back, so the words never describe a colour that is not on screen yet.
+  function paint(s) {
+    light(s);
+    cap.classList.add("swap");
+    setTimeout(function () { words(s); cap.classList.remove("swap"); }, 220);
+  }
+  light(CYCLE[i]); words(CYCLE[i]);
+  // Reduced motion keeps the idle frame: a landing page has no business strobing
+  // at someone when the product itself ships a reduce-flashing setting.
+  if (!reduce) {
+    setInterval(function () { i = (i + 1) % CYCLE.length; paint(CYCLE[i]); }, 2600);
+  }
+
+  // ---- hardware demo: one scenario, three classes of machine ----
+  // Colours and folding match core/rules.py: any tab waiting on you wins over any
+  // tab running, which wins over idle. `off` is a slot with no agent in it.
+  var C = { input: "#f87171", running: "#fbbf24", done: "#4ade80", off: "#20242e" };
+  var STORY = [
+    { slots: ["running", "running", "off", "off"], ev: "agents.status · running",
+      say: "Two agents working — neither needs you" },
+    { slots: ["input", "running", "off", "off"], ev: "agent.needs_input · claude",
+      say: "Claude stopped at a permission prompt" },
+    { slots: ["done", "running", "off", "off"], ev: "agent.finished · claude",
+      say: "Claude finished, Codex is still going", toast: true },
+    { slots: ["done", "done", "off", "off"], ev: "agents.status · done",
+      say: "Everything idle" },
+    { slots: ["running", "input", "running", "running"], ev: "agents.sessions",
+      say: "Four tabs open, one light each" }
+  ];
+  function fold(slots) {
+    if (slots.indexOf("input") > -1) return "input";
+    if (slots.indexOf("running") > -1) return "running";
+    return "done";
+  }
+
+  var rigs = { zones: document.getElementById("rig-zones"),
+               mac: document.getElementById("rig-mac"),
+               keys: document.getElementById("rig-keys") };
+  if (rigs.zones) {
+    var zoneGs = [].slice.call(document.querySelectorAll("#zones [data-zone]"));
+    var keyGs = [].slice.call(document.querySelectorAll("#keycaps [data-key]"));
+    var bars = [].slice.call(document.querySelectorAll(".rig [data-bar]"));
+    var edges = [].slice.call(document.querySelectorAll(".rig [data-edge]"));
+    var toast = document.querySelector(".rig [data-toast]");
+    var toastDot = document.querySelector(".rig [data-toastdot]");
+    var notes = [].slice.call(document.querySelectorAll(".rig-note [data-note]"));
+    var tabs = [].slice.call(document.querySelectorAll(".tabs [data-rig]"));
+    var rdCap = document.getElementById("readout"),
+        rdDot = document.getElementById("rd-dot"),
+        rdSay = document.getElementById("rd-say"),
+        rdEv = document.getElementById("rd-ev");
+
+    function lights(step) {
+      var overall = C[fold(step.slots)];
+      // one board, coloured a zone at a time; an empty zone stays at key colour
+      zoneGs.forEach(function (g, i) {
+        var st = step.slots[i] || "off";
+        var lit = st !== "off";
+        var c = C[st];
+        [].forEach.call(g.querySelectorAll(".zkey"), function (k) {
+          k.setAttribute("fill", lit ? c : "#1a1e27");
+          k.setAttribute("fill-opacity", lit ? ".92" : "1");
+          k.setAttribute("stroke", lit ? c : "#262c38");
+        });
+      });
+      // ten labeled keys, one per tab, the rest of the board left alone
+      keyGs.forEach(function (g, i) {
+        var st = step.slots[i];
+        var lit = st && st !== "off";
+        var r = g.querySelector("rect"), t = g.querySelector("text");
+        r.setAttribute("fill", lit ? C[st] : "#191d26");
+        r.setAttribute("stroke", lit ? C[st] : "#2b313d");
+        if (t) t.setAttribute("fill", lit ? "#10131a" : "#525a6b");
+      });
+      bars.forEach(function (b) { b.setAttribute("fill", overall); });
+      edges.forEach(function (e) { e.setAttribute("stroke", overall); });
+      if (toast) {
+        toast.classList.toggle("off", !step.toast);
+        if (step.toast) toastDot.setAttribute("fill", C.done);
+      }
+      rdDot.style.background = overall;
+      rdDot.style.boxShadow = "0 0 10px " + overall;
+    }
+    function words(step) { rdSay.textContent = step.say; rdEv.textContent = step.ev; }
+    function show(step) {
+      lights(step);
+      rdCap.classList.add("swap");
+      setTimeout(function () { words(step); rdCap.classList.remove("swap"); }, 220);
+    }
+
+    var si = 0, timer = null;
+    function tick() { si = (si + 1) % STORY.length; show(STORY[si]); }
+    function start() { if (!reduce && !timer) timer = setInterval(tick, 2800); }
+
+    tabs.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var want = btn.dataset.rig;
+        tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
+        Object.keys(rigs).forEach(function (k) { rigs[k].hidden = k !== want; });
+        notes.forEach(function (n) { n.hidden = n.dataset.note !== want; });
+      });
+      // Arrow keys move between tabs, the way a real tablist behaves.
+      btn.addEventListener("keydown", function (e) {
+        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+        if (!d) return;
+        e.preventDefault();
+        var next = tabs[(tabs.indexOf(btn) + d + tabs.length) % tabs.length];
+        next.focus(); next.click();
+      });
+    });
+
+    // Reduced motion holds the frame where a task has just landed: the toast is
+    // up and two states are on screen at once, so the idea still reads standing still.
+    if (reduce) { si = 2; show(STORY[2]); }
+    else {
+      lights(STORY[0]); words(STORY[0]);
+      // Only run while the section is actually on screen.
+      if ("IntersectionObserver" in window) {
+        new IntersectionObserver(function (es) {
+          es.forEach(function (e) {
+            if (e.isIntersecting) start();
+            else if (timer) { clearInterval(timer); timer = null; }
+          });
+        }, { threshold: 0.25 }).observe(document.getElementById("how"));
+      } else { start(); }
+    }
+  }
+
+  // ---- copy buttons ----
+  function wire(btn, text) {
+    btn.addEventListener("click", function () {
+      var restore = btn.textContent;
+      var done = function () {
+        btn.textContent = "copied";
+        setTimeout(function () { btn.textContent = restore; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        // Can reject on an insecure origin or a denied permission. The command is
+        // in plain text next to the button, so a failure needs no error surfaced.
+        navigator.clipboard.writeText(text).then(done, function () {});
+      }
+    });
+  }
+  // The hero shows one line; Windows gets the PowerShell one. Both are in the
+  // install section regardless, for anyone the sniff gets wrong.
+  if (/Win(dows|32|64)/.test(navigator.userAgent)) {
+    document.getElementById("cmd-text").textContent = 'irm https://brxerq.github.io/lumen/install.ps1 | iex';
+    document.getElementById("cmd-sigil").textContent = ">";
+  }
+  wire(document.getElementById("copy"), document.getElementById("cmd-text").textContent);
+  [].forEach.call(document.querySelectorAll(".copy2"), function (b) { wire(b, b.dataset.cmd); });
+})();
+</script>
+</body>
+</html>

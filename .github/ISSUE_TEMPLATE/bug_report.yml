@@ -1,0 +1,36 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lumen version and how you installed it
+      placeholder: "0.2.0, pip install / from source / binary"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 / macOS 15 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: scan
+    attributes:
+      label: Output of `lumen scan`
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines
+      description: Settings → Open log, or `lumen.log` in the data directory.
+      render: text

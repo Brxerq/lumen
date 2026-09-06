@@ -1,0 +1,77 @@
+[project]
+name = "lumen"
+dynamic = ["version"]
+description = "Something happens on your computer, the devices around you react. Universal device notifications for AI agents, builds and scripts."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Brxerq" }]
+keywords = [
+    "rgb", "keyboard", "led", "lightbar", "notifications", "claude", "codex", "openrgb", "hue", "govee",
+    "automation", "ambient", "developer-tools",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Hardware",
+    "Topic :: System :: Monitoring",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "psutil",              # agent process liveness
+    "openrgb-python",      # every device OpenRGB drives
+    "hidapi",              # raw HID adapters (ASUS Aura laptops)
+    "pystray",             # tray icon
+    "pillow",              # tray icon image
+]
+
+[project.optional-dependencies]
+# The one list, for `pip install -e ".[dev]"`. CI installs exactly this.
+dev = ["pytest", "hypothesis", "pyinstaller", "ruff", "pyright", "build"]
+
+[project.scripts]
+lumen = "lumen.cli:main"
+
+[project.entry-points."lumen.devices"]
+# Third-party device adapters register here: name = "package.module" (module exposes discover()).
+
+[project.entry-points."lumen.integrations"]
+# Third-party integrations register here: name = "package.module:INTEGRATION".
+
+[project.urls]
+Homepage = "https://github.com/Brxerq/lumen"
+Repository = "https://github.com/Brxerq/lumen"
+Issues = "https://github.com/Brxerq/lumen/issues"
+Documentation = "https://github.com/Brxerq/lumen/tree/main/docs"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/lumen/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lumen"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+
+[tool.ruff.lint]
+# Correctness and modernisation, not house style: the codebase deliberately
+# writes long lines and small lambdas, and pairs `zip()` over lists it built.
+select = ["E4", "E7", "E9", "F", "W", "I", "UP", "B"]
+ignore = ["B905", "E731", "B008", "UP031"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]

@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for Lumen — an integration, an effect, a UI improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would this let you do?
+      description: Describe the situation, not the solution — "when X happens I want to notice it without looking".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: If you have a shape in mind (an event type, a rule, a setting), sketch it.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Integration (event source), Effect / rule engine, Dashboard / UI, CLI, Packaging, Other]

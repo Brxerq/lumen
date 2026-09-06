@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="976" height="342" viewBox="0 0 976 342" role="img" aria-labelledby="title desc">
+  <title id="title">Lumen — primary logo</title>
+  <desc id="desc">Approved split-pill mark with a custom lowercase wordmark rebuilt as editable vector paths. Transparent background. No embedded fonts or raster images.</desc>
+  <defs>
+    <radialGradient id="lumen-violet" cx="50%" cy="56%" r="70%">
+      <stop offset="0" stop-color="#F4F1FF"/>
+      <stop offset="0.53" stop-color="#EAE1FD"/>
+      <stop offset="1" stop-color="#DCC8F6"/>
+    </radialGradient>
+    <radialGradient id="lumen-cyan" cx="50%" cy="43%" r="70%">
+      <stop offset="0" stop-color="#EDFCFF"/>
+      <stop offset="0.53" stop-color="#D8F8FF"/>
+      <stop offset="1" stop-color="#B8EAF3"/>
+    </radialGradient>
+  </defs>
+  <g id="lumen-logo" transform="translate(24 24)">
+    <g id="lumen-icon"><path id="container" fill="#FFFFFF" d="M 84,0 C 130.392,0 168,37.608 168,84 L 168,210 C 168,256.392 130.392,294 84,294 C 37.608,294 0,256.392 0,210 L 0,84 C 0,37.608 37.608,0 84,0 Z"/>
+      <path id="surface-top" data-surface="keyboard-claude" fill="url(#lumen-violet)" d="M 84,30 C 117.3,30 138,50.4 138,82 L 138,103 C 138,133.6 121.7,145 84,145 C 46.3,145 30,133.6 30,103 L 30,82 C 30,50.4 50.7,30 84,30 Z"/>
+      <path id="surface-bottom" data-surface="lightbar-codex" fill="url(#lumen-cyan)" d="M 84,158 C 122.2,158 138,171.6 138,201 L 138,210 C 138,242.2 117.1,264 84,264 C 50.9,264 30,242.2 30,210 L 30,201 C 30,171.6 45.8,158 84,158 Z"/></g>
+    <g id="lumen-wordmark" fill="#FFFFFF" transform="translate(-264 -188)">
+      <path id="letter-l" d="M 496,246 H 526 Q 528,246 528,248 V 388 C 528,397 532,400 539,400 H 543 V 424 H 524 C 504,424 494,411 494,387 V 248 Q 494,246 496,246 Z"/>
+      <path id="letter-u" d="M 553,294 H 584 Q 585,294 585,295 V 368 C 585,389 596,400 619,400 C 642,400 653,389 653,368 V 295 Q 653,294 654,294 H 685 Q 686,294 686,295 V 368 C 686,405 662,427 619,427 C 576,427 552,405 552,368 V 295 Q 552,294 553,294 Z"/>
+      <path id="letter-m" d="M 701,424 Q 700,424 700,423 V 354 C 700,315 723,292 760,292 C 778,292 793,299 803,310 C 814,299 829,292 847,292 C 884,292 906,315 906,354 V 423 Q 906,424 905,424 H 873 Q 872,424 872,423 V 354 C 872,334 863,323 846,323 C 829,323 819,335 819,354 V 423 Q 819,424 818,424 H 787 Q 786,424 786,423 V 354 C 786,334 777,323 760,323 C 743,323 734,335 734,354 V 423 Q 734,424 733,424 Z"/>
+      <path id="letter-e" fill-rule="evenodd" d="M 1058,371 H 954 C 960,388 973,399 990,399 C 1003,399 1013,394 1019,387 L 1053,388 C 1042,412 1019,427 990,427 C 949,427 920,399 920,360 C 920,320 949,292 990,292 C 1030,292 1059,321 1059,360 C 1059,364 1059,368 1058,371 Z M 955,347 H 1026 C 1020,331 1007,322 990,322 C 974,322 961,331 955,347 Z"/>
+      <path id="letter-n" d="M 1072,424 Q 1071,424 1071,423 V 354 C 1071,315 1095,292 1131.5,292 C 1168,292 1192,315 1192,354 V 423 Q 1192,424 1191,424 H 1159 Q 1158,424 1158,423 V 354 C 1158,334 1148,323 1131.5,323 C 1115,323 1105,334 1105,354 V 423 Q 1105,424 1104,424 Z"/>
+    </g>
+  </g>
+</svg>

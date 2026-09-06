@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen</title>
+<link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
+<link rel="alternate icon" href="brand/lumen.ico">
+<link rel="apple-touch-icon" href="brand/lumen-icon-256.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <!-- Inlined rather than referenced as brand/lumen-icon.svg: the capsule shell
+           has to flip with the theme, and an SVG behind an image tag cannot see this
+           page's data-theme. The two light surfaces keep the brand gradients. -->
+      <svg class="brand-mark" viewBox="0 0 168 294" aria-hidden="true" focusable="false">
+        <defs>
+          <radialGradient id="brand-violet" cx="50%" cy="56%" r="70%">
+            <stop offset="0" stop-color="#F4F1FF"/><stop offset=".53" stop-color="#EAE1FD"/><stop offset="1" stop-color="#DCC8F6"/>
+          </radialGradient>
+          <radialGradient id="brand-cyan" cx="50%" cy="43%" r="70%">
+            <stop offset="0" stop-color="#EDFCFF"/><stop offset=".53" stop-color="#D8F8FF"/><stop offset="1" stop-color="#B8EAF3"/>
+          </radialGradient>
+        </defs>
+        <path class="brand-shell" d="M 84,0 C 130.392,0 168,37.608 168,84 L 168,210 C 168,256.392 130.392,294 84,294 C 37.608,294 0,256.392 0,210 L 0,84 C 0,37.608 37.608,0 84,0 Z"/>
+        <path fill="url(#brand-violet)" d="M 84,30 C 117.3,30 138,50.4 138,82 L 138,103 C 138,133.6 121.7,145 84,145 C 46.3,145 30,133.6 30,103 L 30,82 C 30,50.4 50.7,30 84,30 Z"/>
+        <path fill="url(#brand-cyan)" d="M 84,158 C 122.2,158 138,171.6 138,201 L 138,210 C 138,242.2 117.1,264 84,264 C 50.9,264 30,242.2 30,210 L 30,201 C 30,171.6 45.8,158 84,158 Z"/>
+      </svg>
+      <span class="brand-name" role="img" aria-label="Lumen"></span>
+      <span class="brand-version" id="version"></span>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#dashboard" data-page="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+      <a href="#devices" data-page="devices"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>Devices</a>
+      <a href="#automations" data-page="automations"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Automations</a>
+      <a href="#integrations" data-page="integrations"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>Integrations</a>
+      <a href="#effects" data-page="effects"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg>Playground</a>
+      <a href="#settings" data-page="settings"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h13M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18.5" cy="18" r="2"/></svg>Settings</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="daemon" id="daemon-status"><span class="dot"></span><span>connecting…</span></div>
+      <a class="foot-link" href="https://github.com/Brxerq/lumen" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script src="app.js"></script>
+</body>
+</html>

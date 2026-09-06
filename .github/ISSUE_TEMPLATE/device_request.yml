@@ -1,0 +1,32 @@
+name: Device support request
+description: Hardware you'd like Lumen to detect and drive.
+labels: [device]
+body:
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: "Logitech G915, Nanoleaf Shapes, Dell XPS keyboard backlight…"
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How does it connect?
+      options: [USB / HID, Built into a laptop, Wi-Fi / LAN, Bluetooth, Cloud only, Not sure]
+  - type: textarea
+    id: info
+    attributes:
+      label: What do you know about controlling it?
+      description: Vendor SDK, OpenRGB support, a documented LAN API, a reverse-engineered protocol, a link to another project that drives it.
+  - type: textarea
+    id: scan
+    attributes:
+      label: Output of `lumen scan` with the device connected
+      render: text
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you test?
+      options:
+        - label: I own this device and can test an adapter on real hardware.

@@ -1,0 +1,68 @@
+name: release
+
+# Tag a version (git tag v0.3.0 && git push --tags) and this attaches the
+# frozen binaries to a GitHub release. The dashboard's "Check for updates"
+# button reads that release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            asset: lumen.exe
+            built: dist/lumen.exe
+          - os: macos-latest
+            asset: lumen-macos
+            built: dist/lumen
+          - os: ubuntu-latest
+            asset: lumen-linux
+            built: dist/lumen
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: pyinstaller build/lumen.spec --distpath dist --workpath build/pyi -y
+      - name: Name the binary after the platform and record its checksum
+        shell: bash
+        run: |
+          mv "${{ matrix.built }}" "${{ matrix.asset }}"
+          # The in-app updater refuses to install anything whose SHA-256 is not
+          # listed here, so every job writes its own line. The runners disagree
+          # about which checksum tool exists: Linux and Git Bash on Windows have
+          # sha256sum, macOS has shasum.
+          if command -v sha256sum >/dev/null; then
+            sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          fi
+          cat "${{ matrix.asset }}.sha256"
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          files: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+          generate_release_notes: true
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: robinraju/release-downloader@28fc21f50d76778e7023361aa1f863e717d3d56f  # v1.13
+        with:
+          tag: ${{ github.ref_name }}
+          fileName: "*.sha256"
+          out-file-path: sums
+      - run: cat sums/*.sha256 > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          files: SHA256SUMS

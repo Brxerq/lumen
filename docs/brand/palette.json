@@ -1,0 +1,46 @@
+{
+  "foreground": "#191C23",
+  "reversed_foreground": "#FFFFFF",
+  "static_brand_top": {
+    "type": "radial-gradient",
+    "stops": [
+      {
+        "offset": 0,
+        "color": "#F4F1FF"
+      },
+      {
+        "offset": 0.53,
+        "color": "#EAE1FD"
+      },
+      {
+        "offset": 1,
+        "color": "#DCC8F6"
+      }
+    ]
+  },
+  "static_brand_bottom": {
+    "type": "radial-gradient",
+    "stops": [
+      {
+        "offset": 0,
+        "color": "#EDFCFF"
+      },
+      {
+        "offset": 0.53,
+        "color": "#D8F8FF"
+      },
+      {
+        "offset": 1,
+        "color": "#B8EAF3"
+      }
+    ]
+  },
+  "geometry_preview_gray": "#A3A3AD",
+  "runtime_mapping_from_brief": {
+    "busy": "red",
+    "idle": "green",
+    "stale": "amber",
+    "unknown": "blue"
+  },
+  "runtime_note": "Use the existing application hex values; brand gradients and preview gray are not live states."
+}

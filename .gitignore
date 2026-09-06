@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/pyi/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+
+# Local data
+*.log
+.dev-home/
+.DS_Store
+node_modules/
+memory/
+
+# Local demo recorder and its recording
+demo.sh
+demo/
