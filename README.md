@@ -101,7 +101,7 @@ Want your hardware here? See [docs/PLUGINS.md](docs/PLUGINS.md) — most adapter
 
 | Source | How | Events |
 |---|---|---|
-| **Claude Code** (CLI, VS Code, Cursor, JetBrains, desktop) | One-click hook install, plus a hook-free transcript fallback | `agent.running`, `agent.needs_input`, `agent.finished`, `agents.status`, `agents.sessions` (one keyboard zone per tab) |
+| **Claude Code** (CLI, VS Code, Cursor, JetBrains, desktop) | One-click hook install, plus a hook-free transcript fallback | `agent.running`, `agent.needs_input`, `agent.finished`, `agents.status`, `agents.sessions` (the open tabs share the keyboard zones) |
 | **Codex** (CLI, VS Code, desktop) | Hook install + rollout fallback | same |
 | **GitHub Actions** | Polls `gh run list` for the repos you choose | `github.workflow.succeeded` / `.failed` |
 | **Terminal & scripts** | `lumen exec -- <cmd>`, `lumen emit <type>`, `lumen timer 25m`, shell snippet for slow commands | `command.*`, `timer.finished`, anything |

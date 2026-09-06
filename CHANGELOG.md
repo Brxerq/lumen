@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- **Your open tabs share the whole device.** A four-zone keyboard used to light
+  one zone per tab and leave the rest dark, which reads as broken hardware
+  rather than as free seats. Now one tab lights the whole keyboard, two take
+  half each, and three across four zones take 2 / 1 / 1. The dashboard draws
+  those blocks the way the hardware shows them — one block per tab, not four
+  squares of two colours — and numbers tabs by their place in the list instead
+  of by a raw slot that could read "10" with four tabs open.
+
+### Fixed
+- **Idle Claude tabs no longer report "working" forever.** Claude Code writes a
+  `task-notification` prompt into the transcript when a tab is reopened with
+  background work unaccounted for. Nobody answers it until that tab is focused,
+  so the transcript ended on an unanswered prompt and Lumen read the session as
+  a turn in progress — one working tab showed up as three or four, each holding
+  a keyboard zone amber for hours. Only a human prompt or a tool result counts
+  as an open turn now.
+- **Dropdown menus are no longer clipped.** The Test menu is placed against the
+  viewport instead of inside its row, so it escapes the card, the modal and the
+  setup wizard's device list — all of which hide their own overflow — and flips
+  above the button when it is near the bottom of the window. In setup the last
+  device's menu used to open as an unreadable sliver.
+
 ### Added
 - **A volume for the sound.** The slider on each device row is a dimmer for a
   light and the volume for the speaker, 5% to 100%. It is rendered into the tone

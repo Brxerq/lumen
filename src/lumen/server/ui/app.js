@@ -71,6 +71,7 @@ async function api(method, path, body) {
     clearTimeout(deadline);
   }
 }
+function closeMenus() { document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open")); }
 function toast(text, err) {
   const el = document.createElement("div");
   el.className = "toast" + (err ? " err" : "");
@@ -210,6 +211,18 @@ function renderDashboard(st) {
   </div>`;
 }
 
+// Mirrors effects.spread_zones on the daemon side: the tabs that are open widen
+// until they cover the device, so one tab lights the whole keyboard, two split
+// it in half, and three across four zones take 2 / 1 / 1. A lit zone beside a
+// dark one reads as broken hardware rather than as a free seat.
+function spreadSeats(list, n) {
+  const used = list.filter(z => z.tab);
+  if (!used.length || used.length === n) return list;
+  const out = [];
+  used.forEach((seat, i) => out.push(...Array((n / used.length | 0) + (i < n % used.length ? 1 : 0)).fill(seat)));
+  return out;
+}
+
 // Which slot each zone of each device is showing, worked out from the enabled
 // `sessions` actions rather than guessed. It has to be read off the rules: a
 // rule can point the light bar at slot 5 so it carries on where a 4-zone
@@ -221,7 +234,10 @@ function zoneLayout(st) {
   const folded = new Map();    // device id -> agent, for devices showing one colour for all its tabs
   // A device pointed at one agent counts that agent's tabs from its own zone 1,
   // exactly as effects.agent_sessions re-ranks them before painting.
-  const ranked = agent => st.sessions.filter(s => !agent || s.agent === agent).sort((a, b) => (a.slot || 0) - (b.slot || 0));
+  const ranked = agent => {
+    const mine = st.sessions.filter(s => !agent || s.agent === agent).sort((a, b) => (a.slot || 0) - (b.slot || 0));
+    return agent ? mine.map((s, i) => ({ ...s, slot: i })) : mine;
+  };
   for (const r of st.rules) {
     if (!r.enabled) continue;
     for (const a of r.actions) {
@@ -233,17 +249,18 @@ function zoneLayout(st) {
         // Whole-device layout, or nowhere to put a second tab: one colour for the lot.
         if (a.per_zone === false || d.zones < 2) { folded.set(d.id, a.agent || ""); zones.delete(d.id); continue; }
         folded.delete(d.id);
-        const tabs = ranked(a.agent || "");
-        const list = Array.from({ length: d.zones }, (_, z) => ({ n: z + (a.offset || 0), tab: tabs[z + (a.offset || 0)] || null }));
+        const tabs = ranked(a.agent || ""), off = a.offset || 0;
+        const no = new Map(tabs.map((t, i) => [t.id, i + 1]));   // the tab's place in the list, for the label
+        const list = Array.from({ length: d.zones }, (_, z) => ({ tab: tabs.find(t => (t.slot || 0) - off === z) || null }));
         // Past the last zone, a busy tab borrows a free zone, else the last idle one (effects.session_zones).
         const busy = t => t && (t.status === "input" || t.status === "running");
-        for (const t of tabs.slice((a.offset || 0) + d.zones).filter(busy).sort((x, y) => (x.status === "input" ? 0 : 1) - (y.status === "input" ? 0 : 1))) {
+        for (const t of tabs.filter(t => (t.slot || 0) - off >= d.zones).filter(busy).sort((x, y) => (x.status === "input" ? 0 : 1) - (y.status === "input" ? 0 : 1))) {
           const spare = list.map((z, i) => busy(z.tab) ? -1 : i).filter(i => i >= 0);
           if (!spare.length) break;
           const free = spare.filter(i => !list[i].tab);
           list[(free.length ? free : spare).pop()].tab = t;
         }
-        zones.set(d.id, list);
+        zones.set(d.id, spreadSeats(list, d.zones).map(seat => ({ ...seat, n: seat.tab ? no.get(seat.tab.id) : 0 })));
       }
     }
   }
@@ -289,27 +306,36 @@ function liveBoard(st) {
         const seats = zones.get(d.id);
         const whose = agentOf.get(d.id) ? `${agentName(agentOf.get(d.id))} tabs` : "agent tabs";
         const shape = zs.length < 2 ? " solid" : d.kind === "keyboard" ? " keys" : " bar";
+        const owners = seats ? new Set(seats.filter(s => s.tab).map(s => s.tab.id)).size : 0;
         const sub = zs.length < 2 ? "single colour"
-          : seats ? `${zs.length} zones · ${whose} ${seats[0].n + 1}–${seats[seats.length - 1].n + 1}`
+          : owners ? `${zs.length} zones · ${owners === 1 ? `one ${whose.slice(0, -1)} across all of them` : `${owners} ${whose}, sharing them`}`
           : `${zs.length} zones`;
+        // Zones the same tab owns are drawn as one block, because that is what the
+        // hardware shows: two halves of a keyboard, not four squares of two colours.
+        const cells = [];
+        zs.forEach((z, i) => {
+          const seat = seats ? seats[i] : null, last = cells[cells.length - 1];
+          if (last && seat && last.seat?.tab && seat.tab && last.seat.tab.id === seat.tab.id) { last.span++; return; }
+          cells.push({ z, i, seat, span: 1 });
+        });
         return `<div class="board-dev">
           <div class="board-label"><b>${h(d.name)}</b><span>${h(sub)}</span></div>
-          <div class="zones${shape}">${zs.map((z, i) => {
+          <div class="zones${shape}">${cells.map(({ z, i, seat, span }) => {
             const dark = !z || !z.some(c => c > 24);
-            const seat = seats ? seats[i] : null;
             const owner = seat && seat.tab;
-            const title = !seat ? `Zone ${i + 1}`
-              : owner ? `Zone ${i + 1} · ${whose.slice(0, -1)} ${seat.n + 1}: ${sessionName(owner)} (${STATUS_LABEL[owner.status] || owner.status})`
-              : `Zone ${i + 1} · ${whose.slice(0, -1)} ${seat.n + 1}: nothing open`;
-            return `<i class="${dark ? "dark" : ""}" style="background:${dark ? "var(--panel-2)" : hex(z)}" title="${h(title)}">${zs.length > 1
-              ? `<b>${seat ? seat.n + 1 : i + 1}</b>${owner ? `<em>${h(sessionName(owner))}</em>` : ""}` : ""}</i>`;
+            const where = span > 1 ? `Zones ${i + 1}–${i + span}` : `Zone ${i + 1}`;
+            const title = !seat ? where
+              : owner ? `${where} · ${whose.slice(0, -1)} ${seat.n}: ${sessionName(owner)} (${STATUS_LABEL[owner.status] || owner.status})`
+              : `${where} · nothing open`;
+            return `<i class="${dark ? "dark" : ""}" style="background:${dark ? "var(--panel-2)" : hex(z)};flex:${span}" title="${h(title)}">${zs.length > 1
+              ? `<b>${owner ? seat.n : i + 1}</b>${owner ? `<em>${h(sessionName(owner))}</em>` : ""}` : ""}</i>`;
           }).join("")}</div></div>`;
       }).join("")}
       <div class="board-legend">
         <span><i class="swatch-sm" style="background:#fbbf24"></i>working</span>
         <span><i class="swatch-sm" style="background:#f87171"></i>needs you</span>
         <span><i class="swatch-sm" style="background:#4ade80"></i>done</span>
-        <span class="dim">Each zone is numbered with the agent tab it shows.</span>
+        <span class="dim">Every block is one agent tab. Open tabs share the device between them.</span>
       </div>
     </div></div></div>`;
 }
@@ -349,22 +375,22 @@ function sessionList(st) {
     const sharing = foldedIds.get(s.id);
     return `<div class="row session${placed || sharing ? "" : " off-zone"}" draggable="true" data-sid="${h(s.id)}" role="listitem"
       ondragstart="L.dragStart(event,'${js(s.id)}')" ondragover="L.dragOver(event)" ondrop="L.drop(event,'${js(s.id)}')" ondragend="L.dragEnd()">
-      <span class="grip" aria-hidden="true" title="Drag to another zone">⠿</span>
-      <span class="slot ${placed || sharing ? h(s.status) : "unplaced"}" title="${placed ? `Zone ${s.slot + 1}`
-      : sharing ? `Shown on ${deviceById(sharing)?.name || sharing}, in one colour with the other tabs` : `Slot ${s.slot + 1}. No device has a zone this far along`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${s.slot + 1}</span>
+      <span class="grip" aria-hidden="true" title="Drag to reorder">⠿</span>
+      <span class="slot ${placed || sharing ? h(s.status) : "unplaced"}" title="${placed ? `Tab ${i + 1}, left to right on your devices`
+      : sharing ? `Shown on ${deviceById(sharing)?.name || sharing}, in one colour with the other tabs` : `Tab ${i + 1}. Every zone is taken by a tab further up`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${i + 1}</span>
       <div class="row-main">
         <div class="row-title"><input class="name-edit" value="${h(name)}" aria-label="Name for this tab"
           title="Rename this tab" onchange="L.labelSession('${js(s.id)}', this.value)"></div>
         <div class="row-sub">${h(s.agent)} · ${s.started ? "open for " + ago(s.started) : "tracked from the agent's own record"}${s.ts ? " · updated " + ago(s.ts) + " ago" : ""}</div>
         ${s.cwd ? `<div class="row-sub tech" title="${h(s.cwd)}">${h(shortPath(s.cwd))}</div>` : ""}</div>
       <div class="row-actions"><span class="pill ${h(s.status)}">${STATUS_LABEL[s.status] || h(s.status)}</span>
-        <button class="btn sm ghost icon" aria-label="Move ${h(name)} up a zone" title="Move up a zone" ${i ? "" : "disabled"} onclick="L.moveSession('${js(s.id)}', -1)">▲</button>
-        <button class="btn sm ghost icon" aria-label="Move ${h(name)} down a zone" title="Move down a zone" ${i === sess.length - 1 ? "disabled" : ""} onclick="L.moveSession('${js(s.id)}', 1)">▼</button>
+        <button class="btn sm ghost icon" aria-label="Move ${h(name)} earlier" title="Move earlier" ${i ? "" : "disabled"} onclick="L.moveSession('${js(s.id)}', -1)">▲</button>
+        <button class="btn sm ghost icon" aria-label="Move ${h(name)} later" title="Move later" ${i === sess.length - 1 ? "disabled" : ""} onclick="L.moveSession('${js(s.id)}', 1)">▼</button>
         <button class="btn sm ghost icon" aria-label="Forget ${h(name)}" title="Forget this tab. It comes back if the tab is still open." onclick="L.forget('${js(s.id)}')">✕</button></div></div>`;
   };
   const group = list => `<div class="rows" role="list">${list.map(row).join("")}</div>`;
   return `<div class="section"><div class="section-head"><h2>Open agent tabs</h2><span class="count">${sess.length}</span>${sess.length > 1
-    ? `<span class="spacer"></span><span class="more dim">drag to change zones</span>` : ""}</div>
+    ? `<span class="spacer"></span><span class="more dim">drag to reorder</span>` : ""}</div>
     <div class="card">${sess.length ? `${group(onZone)}${foldedTabs.length ? `<div class="rows-note">${(() => {
       const dev = deviceById([...foldedIds.values()][0]);
       return `<b>${foldedTabs.length === 1 ? "This tab shares" : `These ${foldedTabs.length} tabs share`} ${dev ? h(dev.name) : "one device"}.</b>
@@ -372,10 +398,10 @@ function sessionList(st) {
         ? ` Switch it to one zone per tab on the <a href="#devices">Devices page</a> to give each its own colour.`
         : ` It has one zone, so it can only ever show the busiest of them.`}`;
     })()}</div>${group(foldedTabs)}` : ""}${offZone.length ? `<div class="rows-note">${seats ? `<b>${offZone.length} more ${offZone.length === 1 ? "tab is" : "tabs are"} open with no zone left.</b>
-      Your devices cover ${seats} ${seats === 1 ? "zone" : "zones"}. Drag one onto a numbered tab to swap it in, or close the tabs you are done with.`
+      Your devices cover ${seats} ${seats === 1 ? "zone" : "zones"}, and the tabs above have taken all of them. Drag one of these up to swap it in, or close the tabs you are done with.`
       : `<b>No automation puts these tabs on a device.</b>
       They are still tracked, but nothing lights up per tab until an automation shows agent status on a device with more than one zone. <a href="#automations">Set one up →</a>`}</div>${group(offZone)}` : ""}`
-      : `<div class="empty"><b>No agent tabs open</b>Open a Claude Code or Codex tab. Each one takes a zone on your keyboard.</div>`}</div></div>`;
+      : `<div class="empty"><b>No agent tabs open</b>Open a Claude Code or Codex tab. One tab lights the whole keyboard; open a second and they take half each.</div>`}</div></div>`;
 }
 
 // A glance, not the Devices page: one line per device with its live colour.
@@ -460,9 +486,9 @@ function renderDevices(st) {
           ${AGENTS.map(([id, name]) => `<option value="${id}" ${shows === id ? "selected" : ""}>${h(name)} tabs only</option>`).join("")}
           <option value="off" ${shows === "off" ? "selected" : ""}>No agent tabs</option>
         </select></label>
-      ${d.zones > 1 && shows !== "off" ? `<label title="One zone per tab, or one colour for all of them"><span class="sr-only">Tab layout on ${h(d.name)}</span>
+      ${d.zones > 1 && shows !== "off" ? `<label title="Share the zones between the open tabs, or one colour for all of them"><span class="sr-only">Tab layout on ${h(d.name)}</span>
         <select class="input sm" onchange="L.deviceLayout('${js(d.id)}', this.value === '1')">
-          <option value="1" ${deviceLayout(st, d.id) ? "selected" : ""}>A zone each</option>
+          <option value="1" ${deviceLayout(st, d.id) ? "selected" : ""}>Split between tabs</option>
           <option value="0" ${deviceLayout(st, d.id) ? "" : "selected"}>One colour for all</option>
         </select></label>` : ""}` : ""}
       <span class="dot ${d.details.enabled === false ? "" : d.connected ? "on" : "off"}" title="${d.connected ? "Connected" : "Not responding"}"></span>
@@ -542,7 +568,7 @@ function actionChips(a) {
   if (a.effect === "sessions") {
     const pal = a.palette || DEF_PALETTE;
     const who = a.agent ? a.agent[0].toUpperCase() + a.agent.slice(1) : "any agent";
-    return `<span class="chip dev">${h(dev)}</span><span class="arrow">→</span><span class="chip">${["running", "input", "done"].map(k => `<span class="swatch-sm" style="background:${hex(pal[k])}" title="${STATUS_LABEL[k]}"></span>`).join("")}${h(eff.label)}</span><span class="muted small">${h(who)} · ${a.per_zone === false ? "whole device" : `one zone per session, from slot ${(a.offset || 0) + 1}`}</span>`;
+    return `<span class="chip dev">${h(dev)}</span><span class="arrow">→</span><span class="chip">${["running", "input", "done"].map(k => `<span class="swatch-sm" style="background:${hex(pal[k])}" title="${STATUS_LABEL[k]}"></span>`).join("")}${h(eff.label)}</span><span class="muted small">${h(who)} · ${a.per_zone === false ? "whole device" : `split between the tabs, from tab ${(a.offset || 0) + 1}`}</span>`;
   }
   const extra = [eff.params.includes("count") ? `×${a.count}` : "", eff.params.includes("duration") ? `${a.duration}s` : "", a.effect === "notify" && a.message ? `“${a.message}”` : "", a.effect === "sound" ? a.sound : ""].filter(Boolean).join(" · ");
   return `<span class="chip dev">${h(dev)}</span><span class="arrow">→</span><span class="chip">${hasColor ? `<span class="swatch-sm" style="background:${hex(a.color)}"></span>` : ""}${h(eff.label)}</span>${extra ? `<span class="muted small">${h(extra)}</span>` : ""}`;
@@ -706,7 +732,7 @@ function actionEditor(a, i, devs) {
     </div>
     ${P("agent") ? `<div class="inline">
       <div class="field"><label>Agent</label><select class="input" onchange="L.action(${i}, 'agent', this.value)"><option value="" ${!a.agent ? "selected" : ""}>Any agent</option>${AGENTS.map(([x, name]) => `<option value="${x}" ${a.agent === x ? "selected" : ""}>${h(name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Layout</label><select class="input" onchange="L.action(${i}, 'per_zone', this.value === '1')"><option value="1" ${a.per_zone !== false ? "selected" : ""}>One zone per session</option><option value="0" ${a.per_zone === false ? "selected" : ""}>Whole device, overall status</option></select></div>
+      <div class="field"><label>Layout</label><select class="input" onchange="L.action(${i}, 'per_zone', this.value === '1')"><option value="1" ${a.per_zone !== false ? "selected" : ""}>Split the zones between the tabs</option><option value="0" ${a.per_zone === false ? "selected" : ""}>Whole device, overall status</option></select></div>
     </div>` : ""}
     ${P("palette") ? `<div class="inline palette">${["running", "input", "done"].map(k => `<div class="field"><label>${STATUS_LABEL[k]}</label><div class="inline"><input type="color" class="color-input" id="pal-${i}-${k}" value="${hex((a.palette || DEF_PALETTE)[k])}" oninput="L.palette(${i}, '${k}', this.value)"><div class="presets">${PRESETS.slice(0, 5).map(p => `<span class="preset" style="background:${p}" onclick="L.palette(${i}, '${k}', '${p}')"></span>`).join("")}</div></div></div>`).join("")}
       <div class="field"><label>First slot</label><select class="input" onchange="L.action(${i}, 'offset', +this.value)">${[0, 1, 2, 3, 4, 5, 6, 7].map(o => `<option value="${o}" ${(a.offset || 0) === o ? "selected" : ""}>${o + 1}</option>`).join("")}</select></div></div>
@@ -782,7 +808,20 @@ function renderWizard() {
 // ---------- actions (window.L) ----------
 const L = window.L = {
   b: () => S.bench,
-  menu(btn) { const wrap = btn.parentElement; const open = wrap.classList.contains("open"); document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open")); if (!open) wrap.classList.add("open"); },
+  // The menu is positioned in viewport coordinates rather than inside its row:
+  // it has to escape the card, the modal and the wizard's row list, all of which
+  // clip their overflow, and it flips above the button when there is no room
+  // below — which is what left the last device's Test menu a sliver in setup.
+  menu(btn) {
+    const wrap = btn.parentElement, open = wrap.classList.contains("open");
+    closeMenus();
+    if (open) return;
+    wrap.classList.add("open");
+    const menu = wrap.querySelector(".menu"), at = btn.getBoundingClientRect();
+    const room = innerHeight - at.bottom - 16 >= menu.offsetHeight;
+    menu.style.left = `${Math.max(8, Math.min(at.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = room ? `${at.bottom + 7}px` : `${Math.max(8, at.top - menu.offsetHeight - 7)}px`;
+  },
   testColor(id, v) { S.testColor[id] = v; },
   forget: id => act(() => api("DELETE", `/api/sessions/${id}`), r => r.forgotten ? "session forgotten" : "no hook file for that session (it is tracked from the agent's own record)"),
   test: (id, effect, sound) => act(() => api("POST", `/api/devices/${id}/test`, { effect, sound, color: rgb(S.testColor[id] || "#5fe36a"), count: 2, duration: 1.5 }),
@@ -1037,10 +1076,13 @@ window.addEventListener("pagehide", closeStream);
 // Esc closes whatever is on top: a menu, then the modal.
 document.addEventListener("keydown", ev => {
   if (ev.key !== "Escape") return;
-  const menu = document.querySelector(".menu-wrap.open");
-  if (menu) return menu.classList.remove("open");
+  if (document.querySelector(".menu-wrap.open")) return closeMenus();
   if ($("#modal-root").children.length && !S.wizard) L.closeModal();
 });
+// An open menu is pinned to the viewport, so anything that scrolls under it
+// would leave it hanging over the wrong row. Close it instead of chasing it.
+addEventListener("scroll", closeMenus, true);
+addEventListener("resize", closeMenus);
 
 // ---------- boot ----------
 // Blur first: render() refuses to rebuild while a field inside the page has
@@ -1048,7 +1090,7 @@ document.addEventListener("keydown", ev => {
 // a nav link straight after editing a name is a navigation, not a refresh, and
 // used to leave you on the same page.
 window.addEventListener("hashchange", () => { S.page = location.hash.slice(1) || "dashboard"; document.activeElement?.blur?.(); if (S.draft) L.closeModal(); render(); pollSoon(); });
-document.addEventListener("click", e => { if (!e.target.closest(".menu-wrap")) document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open")); });
+document.addEventListener("click", e => { if (!e.target.closest(".menu-wrap")) closeMenus(); });
 applyTheme(currentTheme());
 S.page = location.hash.slice(1) || "dashboard";
 poll();

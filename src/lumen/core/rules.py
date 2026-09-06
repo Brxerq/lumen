@@ -28,8 +28,9 @@ EFFECTS: dict[str, dict] = {
     "brightness_blink": {"label": "Blink backlight",  "needs": "brightness", "persistent": False, "params": ["count", "duration"]},
     "notify": {"label": "Notification",  "needs": "notify",     "persistent": False, "params": ["message"]},
     "sound":  {"label": "Play sound",    "needs": "sound",      "persistent": False, "params": ["sound"]},
-    # One zone per agent session (agents.sessions event): zone N shows the status color of slot N + offset.
-    # Devices without zones show the folded status instead.
+    # The open agent sessions share the device (agents.sessions event): zone N shows the status
+    # color of slot N + offset, and the tabs then widen to cover the zones none of them claimed —
+    # one tab lights the whole device, two take half each. Devices without zones show the folded status.
     "sessions": {"label": "Agent status", "needs": "color", "persistent": True,
                  "params": ["agent", "per_zone", "palette", "offset", "brightness"]},
 }
@@ -51,7 +52,7 @@ class Action:
     palette: dict = field(default_factory=lambda: dict(DEFAULT_PALETTE))  # sessions: status -> color
     offset: int = 0             # sessions: first slot shown on this device (light bar = 4 for slots 5-6)
     agent: str = ""             # sessions: only this agent's sessions ("" = all), e.g. keyboard=claude, light bar=codex
-    per_zone: bool = True       # sessions: one zone per session; False = whole device shows the folded status
+    per_zone: bool = True       # sessions: the tabs share the zones; False = whole device shows the folded status
 
     @classmethod
     def from_dict(cls, d: dict) -> Action:
@@ -120,7 +121,7 @@ def _color(value) -> tuple:
 
 def default_rules() -> list[Rule]:
     """What a fresh install does: every light mirrors the overall agent status,
-    multi-zone devices show one zone per agent session, and a finished task
+    multi-zone devices share their zones out between the open agent tabs, and a finished task
     gets a double green flash. The zone rule comes last so it wins on devices
     the status rules also paint."""
     return [
@@ -134,6 +135,6 @@ def default_rules() -> list[Rule]:
              actions=[Action(device="*", effect="flash", color=GREEN, count=2, duration=1.2)]),
         Rule(name="Build failed", when="build.failed",
              actions=[Action(device="*", effect="flash", color=RED, count=3, duration=1.5)]),
-        Rule(name="One zone per session", when="agents.sessions",
+        Rule(name="A tab on every zone", when="agents.sessions",
              actions=[Action(device="*", effect="sessions")]),
     ]

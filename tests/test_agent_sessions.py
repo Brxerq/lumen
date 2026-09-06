@@ -150,11 +150,18 @@ def test_claude_transcript_fallback(tmp_path):
     end = {"type": "assistant", "message": {"stop_reason": "end_turn", "content": [{"type": "text"}]}}
     tool = {"type": "assistant", "message": {"stop_reason": "tool_use", "content": [{"type": "tool_use"}]}}
     attach = {"type": "attachment"}
+    prompt = {"type": "user", "message": {"content": "go"}, "origin": {"kind": "human"}}
+    # injected when a tab is reopened with background work unaccounted for; nobody answers it
+    notice = {"type": "user", "message": {"content": "<task-notification/>"}, "origin": {"kind": "task-notification"}}
     mk("idle", [tool, end, attach, attach], 5)
-    mk("busy", [end, {"type": "user", "message": {"content": "go"}}, tool, attach], 5)
+    mk("busy", [end, prompt, tool, attach], 5)
+    mk("queued", [end, prompt], 5)              # prompt sent, first tokens not written yet
+    mk("toolresult", [tool, {"type": "user", "message": {"content": [{"type": "tool_result"}]}}], 5)
+    mk("reopened", [tool, end, notice], 5)      # was reported "working" for hours before this
     mk("old", [tool], 3600)
     mk("dead", [tool], 5, pid=999999)
-    assert claude_code.transcript_states(home) == {"idle": False, "busy": True, "old": True}
+    assert claude_code.transcript_states(home) == {"idle": False, "busy": True, "queued": True,
+                                                  "toolresult": True, "reopened": False, "old": True}
 
 
 def test_agent_integration_emits_transitions(monkeypatch):

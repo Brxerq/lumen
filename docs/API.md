@@ -61,7 +61,7 @@ A rule:
 
 `when` accepts fnmatch wildcards (`build.*`). `device` is a device id or `*` for every device that supports the effect. Effects: `set`, `off`, `flash`, `pulse`, `wave`, `brightness_pulse`, `brightness_blink`, `notify`, `sound`, `sessions`. `message` may use `{key}` placeholders from the event data.
 
-`sessions` (for `agents.sessions` events) paints one zone per live agent session: zone N shows the status color of the session in slot N + `offset` (`palette`: `{"running": [..], "input": [..], "done": [..]}`, empty slots dark). A session keeps its slot until it ends; new ones take the lowest free slot. `agent` limits it to one agent's sessions (re-ranked, so `"claude"` on the keyboard and `"codex"` on the light bar split the hardware between agents); `per_zone: false` paints the whole device with the folded status instead. Devices without zones always show the folded status.
+`sessions` (for `agents.sessions` events) shares the device out between the live agent sessions: zone N shows the status color of the session in slot N + `offset` (`palette`: `{"running": [..], "input": [..], "done": [..]}`), and the sessions then widen to cover any zone none of them claimed — one session lights the whole device, two take half each, three across four zones take 2 / 1 / 1. A session keeps its slot until it ends; new ones take the lowest free slot. `agent` limits it to one agent's sessions (re-ranked, so `"claude"` on the keyboard and `"codex"` on the light bar split the hardware between agents); `per_zone: false` paints the whole device with the folded status instead. Devices without zones always show the folded status.
 
 ## Live updates
 

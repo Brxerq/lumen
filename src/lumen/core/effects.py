@@ -114,8 +114,26 @@ def agent_sessions(sessions: list[dict], agent: str) -> list[dict]:
 _URGENCY = {"input": 0, "running": 1}
 
 
+def spread_zones(shown: dict[int, dict], n: int) -> dict[int, dict]:
+    """Widen the occupied zones until they cover the whole device.
+
+    A dark zone beside a lit one reads as broken hardware, not as a free seat,
+    so the tabs that are open share the device instead: one tab lights all of
+    it, two split it in half, three across four zones take 2 / 1 / 1. Order is
+    kept, so the tab you dragged to the front still owns the left-hand end."""
+    ordered = [shown[i] for i in sorted(shown)]
+    out: dict[int, dict] = {}
+    zone = 0
+    for i, session in enumerate(ordered):
+        for _ in range(n // len(ordered) + (1 if i < n % len(ordered) else 0)):
+            out[zone] = session
+            zone += 1
+    return out
+
+
 def session_zones(n: int, sessions: list[dict], action: Action) -> list[RGB]:
-    """Zone i shows the status color of the session in slot i + offset; empty slots are dark.
+    """Zone i shows the status color of the session in slot i + offset, and the
+    open tabs stretch to fill any zone none of them claimed.
 
     With more sessions than zones, a session that needs you (or is working)
     beyond the last zone borrows a free zone, else the zone of the last idle
@@ -138,6 +156,8 @@ def session_zones(n: int, sessions: list[dict], action: Action) -> list[RGB]:
         if not spare:
             break
         shown[min(spare, key=lambda i: (i in shown, -i))] = s  # a free zone first, then the last idle one
+    if 0 < len(shown) < n:
+        shown = spread_zones(shown, n)
     zones = [(0, 0, 0)] * n
     for i, s in shown.items():
         zones[i] = scale(action.palette.get(s.get("status"), (0, 0, 0)), action.brightness)

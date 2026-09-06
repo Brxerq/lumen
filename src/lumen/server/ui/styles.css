@@ -298,12 +298,12 @@ body { font-variant-numeric: tabular-nums; caret-color: var(--green); }
 
 /* menus */
 .menu-wrap { position: relative; }
-.menu { position: absolute; right: 0; top: calc(100% + 7px); background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 12px; padding: 6px; min-width: 214px; z-index: 30; box-shadow: 0 20px 48px rgba(0, 0, 0, .6); display: none; }
-.menu-wrap.open .menu { display: block; }
-/* A card clips its children so its rounded corners hold. That also clipped any
-   dropdown opened in the last row down to a sliver, and the next card painted
-   over what was left. Let the card spill only while one of its menus is open. */
-.card:has(.menu-wrap.open) { overflow: visible; }
+/* Pinned to the viewport and placed by L.menu(), so the menu is never clipped
+   by the card, the modal or the wizard's row list — each of which hides its own
+   overflow — and can flip above the button when it is near the bottom. */
+.menu { position: fixed; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 12px; padding: 6px; min-width: 214px; z-index: 120; box-shadow: 0 20px 48px rgba(0, 0, 0, .6); display: none; }
+.menu-wrap.open .menu { display: block; animation: menu-in .12s cubic-bezier(.2, .9, .3, 1); }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }
 .menu button { display: flex; width: 100%; text-align: left; gap: 10px; align-items: center; padding: 10px 12px; background: transparent; border: 0; border-radius: 7px; cursor: pointer; color: var(--text); font-size: var(--fs-md); }
 .menu button:hover { background: var(--panel-3); }
 .menu .sep { height: 1px; background: var(--border); margin: 6px 0; }

@@ -42,8 +42,23 @@ def turn_open(transcript: Path) -> bool:
         if entry.get("type") == "assistant":
             return (entry.get("message") or {}).get("stop_reason") != "end_turn"
         if entry.get("type") == "user":
-            return True
+            return _opens_turn(entry)
     return False
+
+
+def _opens_turn(entry: dict) -> bool:
+    """Does this `user` entry mean a turn is running?
+
+    Two shapes reach the transcript. A tool result carries no `origin` and is
+    written mid-turn, so it always does. A prompt carries `origin.kind`, and
+    only a human one does: Claude Code injects a `task-notification` prompt when
+    a tab is reopened with background work unaccounted for, and if nobody
+    focuses that tab it sits there unanswered. Counting it as an open turn is
+    what made idle Claude Desktop tabs report "working" for hours and hold a
+    keyboard zone amber.
+    """
+    origin = entry.get("origin")
+    return not isinstance(origin, dict) or origin.get("kind") == "human"
 
 
 def transcript_states(home: Path = CLAUDE_HOME) -> dict[str, bool]:
