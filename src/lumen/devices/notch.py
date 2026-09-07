@@ -27,13 +27,13 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import cast
 
+from lumen import paths
 from lumen.core.devices import COLOR, RGB, ZONES
 from lumen.devices.screen import ScreenGlow
 
@@ -223,7 +223,7 @@ def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None, 
     for s in rows:
         cost = s.get("cost_usd")
         out.append((str(s.get("agent", "agent")),
-                    str(s.get("label") or os.path.basename(str(s.get("cwd") or "").rstrip("/\\")) or "~"),
+                    str(s.get("label") or paths.basename(str(s.get("cwd") or "")) or "~"),
                     str(s.get("status")), context_percent(s), str(s.get("activity") or ""),
                     float(cost) if isinstance(cost, (int, float)) else None))
     return out

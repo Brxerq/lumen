@@ -5,4 +5,4 @@ raise events; automation rules turn them into light, screen, sound and
 notification effects on whatever hardware is connected.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"

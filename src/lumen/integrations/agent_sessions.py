@@ -146,7 +146,7 @@ def activity_of(payload: dict, previous: str = "") -> str:
     if tool:
         args = payload.get("tool_input")
         args = args if isinstance(args, dict) else {}
-        name = Path(str(args.get("file_path") or "")).name
+        name = paths.basename(str(args.get("file_path") or ""))
         if tool in ("Edit", "Write", "NotebookEdit", "MultiEdit"):
             return f"Editing {name}" if name else "Editing"
         if tool == "Read":

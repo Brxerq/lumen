@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-07
+
+### Fixed
+- **Updating actually leaves Lumen running.** Every pause in the Windows swap
+  script was silently doing nothing. The script is spawned without a console,
+  and cmd's `timeout` refuses to run without one — it exits immediately with
+  "Input redirection is not supported", so `timeout /t 3` returned in 0.03s.
+  The new 21 MB binary was therefore launched the instant the move finished,
+  while Windows Defender still had it open, and the "did it come up?" check ran
+  before it could have. That ended an update with a process that never opened
+  its port, and then with no process at all. The pauses are now `ping -n`,
+  which needs no console, and the script gives the start four rounds of
+  start-and-probe — about a minute — before it gives up.
+- **A tab's file name in the status tab, not its whole path.** `Path(...).name`
+  asks the OS Lumen runs on what a separator is, but hook payloads come from the
+  agent, which need not be the same machine. A Windows path read on Linux came
+  back whole, so a row read "Editing C:\proj\src\api.py".
+
 ## [0.6.0] — 2026-09-07
 
 ### Added
@@ -334,6 +352,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.6.1]: https://github.com/Brxerq/lumen/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Brxerq/lumen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Brxerq/lumen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Brxerq/lumen/compare/v0.3.1...v0.4.0

@@ -209,6 +209,14 @@ def test_spawn_swapper_waits_for_this_process_then_moves_the_file(tmp_path, monk
     body = script.read_text()
     assert str(update.os.getpid()) in body and str(exe) in body and str(new) in body
     assert started["argv"][-1] == str(script)
+    # The swap script waits for the binary to settle and then checks that the
+    # dashboard answers. Both have to work with no console: the script is
+    # spawned with CREATE_NO_WINDOW, and cmd's `timeout` quits immediately
+    # there ("Input redirection is not supported"), which silently turned every
+    # pause into a no-op and left updates with no daemon running.
+    assert "timeout /t" not in body
+    assert ("ping -n" in body) if update.sys.platform == "win32" else ("sleep " in body)
+    assert "6733" in body  # the port it probes for, so a dead start is retried
 
 
 def test_hook_command_quotes_the_interpreter():

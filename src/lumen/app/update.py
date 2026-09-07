@@ -119,27 +119,35 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
     pid = os.getpid()
     if sys.platform == "win32":
         script = Path(tempfile.gettempdir()) / "lumen-update.cmd"
-        # The pause after the move is not politeness. A freshly written 20 MB
-        # binary is still being scanned by Windows Defender, and launching it
-        # inside that window fails with a loader dialog and no daemon at all —
-        # seen once in testing. Hence: settle, start, and start again if nothing
-        # came up. A few seconds of waiting is cheaper than the user quietly
-        # losing Lumen until they next notice.
+        # The pauses here are the whole trick, and they have to be `ping`. This
+        # script runs with CREATE_NO_WINDOW, so it has no console, and cmd's
+        # `timeout` refuses to run without one: "Input redirection is not
+        # supported, exiting the process immediately", returned in 0.03s. Every
+        # wait was silently a no-op, which meant the new 21 MB binary was
+        # launched the instant the move finished — inside the window where
+        # Windows Defender still has it open — and the "did it come up?" check
+        # ran before it could have. Twice that ended with no daemon at all.
+        # `ping -n N 127.0.0.1` needs no console and sleeps N-1 seconds.
         #
         # "Came up" means the dashboard answers on its port, not that a process
-        # with the right name exists. A start inside the Defender window can
-        # leave a PyInstaller bootloader that never spawns the app: one idle
-        # process, no listener — which the old name check read as success, so
-        # the retry never fired and the update ended with no daemon.
+        # with the right name exists: a start inside the Defender window can
+        # leave a PyInstaller bootloader that never spawns the app — one idle
+        # process, no listener, which a name check reads as success. Four
+        # rounds of start-and-probe give the scan about a minute to finish.
+        probe = f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul"
         script.write_text(
             "@echo off\r\n"
-            f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n"
-            f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (timeout /t 1 /nobreak >nul & goto copy)\r\n"
-            "timeout /t 3 /nobreak >nul\r\n"
-            f"start \"\" \"{exe}\"\r\n"
-            "timeout /t 20 /nobreak >nul\r\n"
-            f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul || ("
-            f"taskkill /f /im \"{exe.name}\" >nul 2>&1 & timeout /t 3 /nobreak >nul & start \"\" \"{exe}\")\r\n"
+            f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
+            f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
+            "ping -n 4 127.0.0.1 >nul\r\n"
+            "set /a tries=0\r\n"
+            f":launch\r\nstart \"\" \"{exe}\"\r\n"
+            "ping -n 16 127.0.0.1 >nul\r\n"
+            f"{probe} && goto done\r\n"
+            f"taskkill /f /im \"{exe.name}\" >nul 2>&1\r\n"
+            "set /a tries+=1\r\n"
+            "if %tries% LSS 4 goto launch\r\n"
+            ":done\r\n"
             "del \"%~f0\"\r\n", encoding="utf-8")
         subprocess.Popen(["cmd", "/c", str(script)], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000,
                          close_fds=True)
@@ -148,10 +156,15 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
         script.write_text(
             "#!/bin/sh\n"
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
-            f"mv -f '{new}' '{exe}' && chmod +x '{exe}' && sleep 2 && nohup '{exe}' >/dev/null 2>&1 &\n"
-            "sleep 20\n"
-            f"lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 || "
-            f"{{ pkill -f '{exe}'; sleep 3; nohup '{exe}' >/dev/null 2>&1 & }}\n"
+            f"mv -f '{new}' '{exe}' && chmod +x '{exe}' && sleep 3\n"
+            # Same start-and-probe as on Windows; `sleep` needs no console here,
+            # but a first launch can still be slow enough to be worth a retry.
+            "for try in 1 2 3 4; do\n"
+            f"  nohup '{exe}' >/dev/null 2>&1 &\n"
+            "  sleep 15\n"
+            f"  lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 && break\n"
+            f"  pkill -f '{exe}'\n"
+            "done\n"
             f"rm -f '{script}'\n", encoding="utf-8")
         script.chmod(0o755)
         subprocess.Popen(["/bin/sh", str(script)], start_new_session=True, close_fds=True)

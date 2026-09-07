@@ -12,8 +12,19 @@ Override with the LUMEN_HOME environment variable (tests do).
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+
+
+def basename(path: str) -> str:
+    """The last segment of a path out of an agent's hook payload, either separator.
+
+    `Path(...).name` asks the OS *Lumen* runs on what a separator is, and the
+    payload comes from the agent, which need not be the same machine — a WSL or
+    container tab reporting to a Windows daemon, or the reverse. On Linux,
+    `Path(r"C:\\proj\\api.py").name` is the whole string."""
+    return re.split(r"[\\/]", str(path or "").rstrip("/\\"))[-1]
 
 
 def data_dir() -> Path:
