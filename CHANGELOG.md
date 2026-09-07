@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- **Claude limits show again on machines that only use the desktop app.** Only
+  the `claude` CLI rotates the token in `~/.claude/.credentials.json`; the
+  desktop app keeps its own login, so the file aged out and Lumen reported
+  "no Claude Code login" for good while Codex, whose CLI refreshes its own
+  file, kept working. Lumen now refreshes an expired token with the refresh
+  token, the way the CLI does, and writes the new pair back so the CLI stays
+  signed in. The macOS keychain is still read-only.
+- **The notch's folded number no longer goes blank** for an account with no
+  5-hour window (Codex Pro Lite): it falls back to the week.
+
+### Added
+- **Per-model weekly limits.** The Opus, Sonnet and scoped-model weeks the
+  usage endpoint reports beside the all-models week now appear as extra meters
+  on the dashboard and the notch, and as `seven_day_<model>_used` rule fields.
+
 ## [0.7.2] — 2026-09-07
 
 ### Fixed

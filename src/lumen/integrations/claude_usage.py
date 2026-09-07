@@ -2,12 +2,16 @@
 `/usage` shows — read with the login Claude Code already holds.
 
 The access token sits in the macOS login keychain ("Claude Code-credentials")
-or in ~/.claude/.credentials.json elsewhere. It is used read-only, against the
-same endpoint Claude Code queries; Lumen never refreshes it (a rotated refresh
-token would log Claude Code out), so an expired token simply means "no
-numbers until Claude Code signs in again".
+or in ~/.claude/.credentials.json elsewhere, against the same endpoint Claude
+Code queries. Claude Code only rotates that token while the CLI itself runs;
+the desktop app keeps its own login and leaves the file to age, so on a machine
+that only uses the app the token is expired for good. When it is, and the
+refresh token is still valid, Lumen refreshes it the way the CLI would and
+writes the new pair back to the same file, so the CLI keeps working too. The
+keychain is left read-only: an expired token there waits for the CLI.
 
-    latest() -> {"five_hour": {"used": 23, "resets_at": 1788...}, "seven_day": {...}} or None
+    latest() -> {"five_hour": {"used": 23, "resets_at": 1788...}, "seven_day": {...},
+                 "seven_day_opus": {...}, ...} or None
 """
 
 from __future__ import annotations
@@ -23,9 +27,19 @@ from datetime import datetime
 from pathlib import Path
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code's own OAuth client
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
-WINDOWS = {"five_hour": "five_hour", "seven_day": "seven_day"}  # response key -> ours
+# response key -> ours. The endpoint names windows two ways: as top-level
+# blocks (five_hour, seven_day, seven_day_opus, ...) and as a "limits" array of
+# {kind, percent, resets_at} (session, weekly_all, weekly_opus, ...). Both are
+# read; the named blocks win when they disagree.
+WINDOWS = {"five_hour": "five_hour", "seven_day": "seven_day",
+           "seven_day_opus": "seven_day_opus", "seven_day_sonnet": "seven_day_sonnet"}
+KINDS = {"session": "five_hour", "weekly_all": "seven_day"}  # "limits" kind -> ours
+LABELS = {"five_hour": "Session · 5 hours", "seven_day": "Week · 7 days",
+          "seven_day_opus": "Week · Opus", "seven_day_sonnet": "Week · Sonnet"}
 POLL_S = 300
 # How old the last good reading may be before we stop showing it. Four missed
 # polls: long enough that one flaky request or a laptop waking up does not blank
@@ -54,10 +68,21 @@ def latest(now: float | None = None) -> dict | None:
 
 
 def flat(summary: dict) -> dict:
-    """The two percentages as plain ints beside the nested blocks, so a rule can
+    """Each percentage as a plain int beside the nested blocks, so a rule can
     say "five_hour_used > 80" without reaching into a dict."""
-    return {f"{key}_used": summary[key]["used"] for key in ("five_hour", "seven_day")
-            if isinstance(summary.get(key), dict) and isinstance(summary[key].get("used"), int)}
+    return {f"{key}_used": block["used"] for key, block in summary.items()
+            if isinstance(block, dict) and isinstance(block.get("used"), int)}
+
+
+def label(key: str) -> str:
+    """What to call a window on a meter: the known ones by name, the rest tidied."""
+    return LABELS.get(key) or "Week · " + key.removeprefix("seven_day_").replace("_", " ").capitalize()
+
+
+def ordered(summary: dict) -> list[str]:
+    """Meter order: session, all-models week, then the per-model weeks."""
+    rank = {"five_hour": 0, "seven_day": 1}
+    return sorted((k for k in summary if isinstance(summary[k], dict)), key=lambda k: (rank.get(k, 2), k))
 
 
 def eta_full(now: float | None = None) -> float | None:
@@ -80,8 +105,8 @@ def detail() -> str:
         return _detail
 
 
-def credentials(now: float | None = None) -> dict | None:
-    """The claudeAiOauth block, or None if there is no usable login (missing, unreadable, expired)."""
+def _read_store() -> dict:
+    """The whole credential store (keychain item or file) as a dict, {} if unreadable."""
     try:
         if sys.platform == "darwin":
             out = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
@@ -91,14 +116,58 @@ def credentials(now: float | None = None) -> dict | None:
             text = CREDENTIALS_FILE.read_text(encoding="utf-8")
         data = json.loads(text) if text else {}
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _ms_past(value, now: float) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value / 1000 < now
+
+
+def credentials(now: float | None = None) -> dict | None:
+    """The claudeAiOauth block with a live access token, or None if there is no
+    usable login (missing, unreadable, expired and not refreshable)."""
+    now = now or time.time()
+    data = _read_store()
+    oauth = data.get("claudeAiOauth")
     if not isinstance(oauth, dict) or not oauth.get("accessToken"):
         return None
-    expires = oauth.get("expiresAt")
-    if isinstance(expires, (int, float)) and expires / 1000 < (now or time.time()):
+    if not _ms_past(oauth.get("expiresAt"), now):
+        return oauth
+    return renew(data, now)
+
+
+def renew(data: dict, now: float | None = None) -> dict | None:
+    """Trade the refresh token for a new pair and write it back where Claude Code
+    reads it (the file; the keychain is left alone). None when there is no
+    refresh token, it has expired too, or the server says no."""
+    now = now or time.time()
+    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    if sys.platform == "darwin" or not isinstance(oauth, dict) or not oauth.get("refreshToken") \
+            or _ms_past(oauth.get("refreshTokenExpiresAt"), now):
         return None
-    return oauth
+    body = json.dumps({"grant_type": "refresh_token", "refresh_token": oauth["refreshToken"],
+                       "client_id": CLIENT_ID}).encode("utf-8")
+    req = urllib.request.Request(TOKEN_URL, data=body, headers={
+        "Content-Type": "application/json", "Accept": "application/json", "User-Agent": "lumen"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            fresh = json.loads(r.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(fresh, dict) or not fresh.get("access_token"):
+        return None
+    new = dict(oauth, accessToken=fresh["access_token"],
+               expiresAt=int((now + float(fresh.get("expires_in") or 3600)) * 1000))
+    if fresh.get("refresh_token"):
+        new["refreshToken"] = fresh["refresh_token"]
+    try:
+        tmp = CREDENTIALS_FILE.with_suffix(".json.lumen")
+        tmp.write_text(json.dumps(dict(data, claudeAiOauth=new)), encoding="utf-8")
+        tmp.replace(CREDENTIALS_FILE)
+    except OSError:
+        pass  # still good for this poll; the file keeps the old pair
+    return new
 
 
 def fetch(token: str, timeout: float = 10) -> dict:
@@ -122,18 +191,39 @@ def _when(value) -> float | None:
     return None
 
 
+def _pct(used) -> int | None:
+    if not isinstance(used, (int, float)) or isinstance(used, bool):
+        return None
+    return int(round(max(0.0, min(100.0, float(used)))))
+
+
 def summarize(raw: dict) -> dict:
-    """The two windows we show, as {"used": 0..100, "resets_at": ts | None}. Windows the
+    """The windows we show, as {"used": 0..100, "resets_at": ts | None}. Windows the
     response lacks are left out rather than shown as zero."""
     out = {}
+    limits = raw.get("limits")
+    for item in limits if isinstance(limits, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("kind"), str):
+            continue
+        kind = item["kind"]
+        # a scoped week names its model in `scope` ("weekly_scoped" + Fable ->
+        # seven_day_fable); the unscoped kinds carry the name in the kind itself
+        scope = item.get("scope") if isinstance(item.get("scope"), dict) else {}
+        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+        name = model.get("display_name") if isinstance(model.get("display_name"), str) else ""
+        tail = "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_") or kind.removeprefix("weekly_")
+        ours = KINDS.get(kind) or ("seven_day_" + tail if kind.startswith("weekly_") else None)
+        used = _pct(item.get("percent", item.get("utilization")))
+        if ours and used is not None:
+            out[ours] = {"used": used, "resets_at": _when(item.get("resets_at"))}
     for key, ours in WINDOWS.items():
         block = raw.get(key)
         if not isinstance(block, dict):
             continue
-        used = block.get("utilization", block.get("used"))
-        if not isinstance(used, (int, float)):
+        used = _pct(block.get("utilization", block.get("used")))
+        if used is None:
             continue
-        out[ours] = {"used": int(round(max(0.0, min(100.0, float(used))))), "resets_at": _when(block.get("resets_at"))}
+        out[ours] = {"used": used, "resets_at": _when(block.get("resets_at"))}
     return out
 
 
@@ -143,7 +233,7 @@ def refresh(now: float | None = None) -> dict | None:
     creds = credentials(now)
     if creds is None:
         with _lock:
-            _detail = "no Claude Code login to read (sign in with Claude Code)"
+            _detail = "no Claude Code login to read (run `claude` once to sign in)"
         return None
     try:
         summary = summarize(fetch(creds["accessToken"]))

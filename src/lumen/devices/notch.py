@@ -164,7 +164,7 @@ def clean_usage(usage) -> dict:
     blocks without a numeric "used" are dropped."""
     if not isinstance(usage, dict):
         return {}
-    if "five_hour" in usage or "seven_day" in usage:
+    if any(k == "five_hour" or k.startswith("seven_day") for k in usage):
         usage = {"claude": usage}
     out = {}
     for agent, summary in usage.items():
@@ -294,19 +294,20 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
     `glow_gain` > 1 brightens the bar glow for the "needs you" pulse."""
     from PIL import Image, ImageDraw, ImageFilter
 
-    from lumen.integrations.claude_usage import resets_in
+    from lumen.integrations.claude_usage import label, ordered, resets_in
 
     # usage is one agent's summary, or {agent: summary} for several; the first
-    # agent with a 5-hour figure owns the number on the folded tab
+    # agent's session (or, without one, its week) owns the number on the folded tab
     by_agent = clean_usage(usage or {})
     meters = []
     if unfolded:
         for agent, summary in by_agent.items():
-            who = agent.capitalize() if len(by_agent) > 1 else "Session"
-            for k, name in (("five_hour", f"{who} · 5 hours"), ("seven_day", f"{who} · 7 days" if len(by_agent) > 1 else "Week · 7 days")):
-                if k in summary:
-                    meters.append((name, summary[k]))
-    five = next((s["five_hour"]["used"] for s in by_agent.values() if "five_hour" in s), None)
+            for k in ordered(summary):
+                name = label(k)
+                if len(by_agent) > 1:  # "Claude · 5 hours", "Codex · 7 days"
+                    name = agent.capitalize() + " · " + name.split(" · ", 1)[1]
+                meters.append((name, summary[k]))
+    five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "seven_day") if k in s), None)
     w = PANEL_WIDTH if unfolded else WIDTH
     h = HEIGHT
     if unfolded:

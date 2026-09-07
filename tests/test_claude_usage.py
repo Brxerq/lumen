@@ -6,16 +6,65 @@ import urllib.error
 from lumen.integrations import claude_usage as cu
 
 
-def test_summary_keeps_only_the_windows_we_show():
+def test_summary_keeps_every_window_the_account_has():
     raw = {"five_hour": {"utilization": 23.4, "resets_at": "2026-09-07T12:00:00Z"},
            "seven_day": {"utilization": 140, "resets_at": 1788700000},
-           "seven_day_opus": {"utilization": 5}, "noise": 1}
+           "seven_day_opus": {"utilization": 5}, "noise": 1,
+           "limits": [{"kind": "weekly_sonnet", "percent": 41.6, "resets_at": 1788700000},
+                      {"kind": "weekly_scoped", "percent": 54, "scope": {"model": {"id": None, "display_name": "Fable"}}},
+                      {"kind": "session", "percent": 99}, {"kind": 3}, "x"]}
     out = cu.summarize(raw)
-    assert out["five_hour"]["used"] == 23 and out["five_hour"]["resets_at"] == 1788782400.0
+    assert out["five_hour"]["used"] == 23 and out["five_hour"]["resets_at"] == 1788782400.0   # named block beats "limits"
     assert out["seven_day"] == {"used": 100, "resets_at": 1788700000.0}      # clamped, numeric timestamp accepted
-    assert "seven_day_opus" not in out
+    assert out["seven_day_opus"] == {"used": 5, "resets_at": None}
+    assert out["seven_day_sonnet"] == {"used": 42, "resets_at": 1788700000.0}
+    assert out["seven_day_fable"] == {"used": 54, "resets_at": None}
+    assert cu.ordered(out) == ["five_hour", "seven_day", "seven_day_fable", "seven_day_opus", "seven_day_sonnet"]
+    assert cu.label("seven_day_opus") == "Week · Opus" and cu.label("seven_day_fable") == "Week · Fable"
     assert cu.summarize({"five_hour": {"utilization": "n/a"}, "seven_day": "x"}) == {}
     assert cu.summarize({"five_hour": {"used": 0.5, "resets_at": "garbage"}}) == {"five_hour": {"used": 0, "resets_at": None}}
+
+
+def test_an_expired_token_is_renewed_and_written_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(cu.sys, "platform", "win32")
+    f = tmp_path / ".credentials.json"
+    monkeypatch.setattr(cu, "CREDENTIALS_FILE", f)
+    store = {"mcpOAuth": {"x": 1}, "claudeAiOauth": {"accessToken": "old", "refreshToken": "r1", "expiresAt": 2_000_000,
+                                                     "refreshTokenExpiresAt": 9_000_000, "subscriptionType": "max"}}
+    f.write_text(json.dumps(store))
+    calls = []
+
+    class Reply:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return self.body
+
+    def fake_open(req, timeout=10):
+        calls.append(json.loads(req.data))
+        return Reply(b'{"access_token": "new", "refresh_token": "r2", "expires_in": 3600}')
+    monkeypatch.setattr(cu.urllib.request, "urlopen", fake_open)
+    got = cu.credentials(now=3_000)
+    assert got["accessToken"] == "new" and got["refreshToken"] == "r2" and got["expiresAt"] == 6_600_000
+    assert calls == [{"grant_type": "refresh_token", "refresh_token": "r1", "client_id": cu.CLIENT_ID}]
+    saved = json.loads(f.read_text())
+    assert saved["mcpOAuth"] == {"x": 1} and saved["claudeAiOauth"]["subscriptionType"] == "max"   # the rest survives
+    assert saved["claudeAiOauth"]["accessToken"] == "new" and saved["claudeAiOauth"]["refreshToken"] == "r2"
+    assert cu.credentials(now=3_100)["accessToken"] == "new" and len(calls) == 1              # no second refresh
+    # refresh token expired too: nothing to do, no request
+    store["claudeAiOauth"]["refreshTokenExpiresAt"] = 1_000
+    f.write_text(json.dumps(store))
+    assert cu.credentials(now=3_000) is None and len(calls) == 1
+    # the server says no: still None, file untouched
+    store["claudeAiOauth"]["refreshTokenExpiresAt"] = 9_000_000
+    f.write_text(json.dumps(store))
+    def refuse(req, timeout=10):
+        raise urllib.error.HTTPError(cu.TOKEN_URL, 400, "bad", {}, None)
+    monkeypatch.setattr(cu.urllib.request, "urlopen", refuse)
+    assert cu.credentials(now=3_000) is None and json.loads(f.read_text()) == store
+    # the keychain is never written: on macOS an expired token waits for the CLI
+    monkeypatch.setattr(cu.sys, "platform", "darwin")
+    assert cu.renew(store, now=3_000) is None
 
 
 def test_credentials_are_read_only_and_expired_ones_are_ignored(tmp_path, monkeypatch):
@@ -61,7 +110,7 @@ def test_a_stale_reading_is_not_passed_off_as_current(monkeypatch):
     monkeypatch.setattr(cu, "credentials", lambda now=None: None)         # login gone; _latest is left alone
     assert cu.refresh(now=1_000) is None
     assert cu.latest(now=1_000 + cu.STALE_S + 1) is None
-    assert "sign in with Claude Code" in cu.detail()
+    assert "run `claude` once" in cu.detail()
 
 
 def test_reset_countdown_reads_like_a_person_would_say_it():

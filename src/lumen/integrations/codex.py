@@ -120,7 +120,8 @@ class Codex(AgentIntegration):
         out = super().status()
         usage = codex_usage.latest()
         if usage:
-            parts = [f"{name} {usage[k]['used']}%" for k, name in (("five_hour", "5h"), ("seven_day", "7d")) if k in usage]
+            short = {"five_hour": "5h", "seven_day": "7d"}
+            parts = [f"{short.get(k, k)} {usage[k]['used']}%" for k in claude_usage.ordered(usage)]
             out["detail"] += " · " + " · ".join(parts)
         else:
             # No numbers rather than old ones: say why, so the row does not just
