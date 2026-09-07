@@ -3,11 +3,14 @@
 def test_usage_meters_follow_the_open_tabs():
     from lumen.devices.notch import visible_usage
     usage = {"claude": {"five_hour": {"used": 20}}, "codex": {"seven_day": {"used": 100}}}
-    show = {"claude_usage": True, "codex_usage": True}
+    show = {"claude_usage": True, "codex_usage": True, "usage_follows_tabs": True}
     claude_only = [{"agent": "claude"}]
     both = [{"agent": "claude"}, {"agent": "codex"}]
 
-    # Codex closed: its meter goes with it, however true the number still is.
+    # by default a known limit stays up whether or not that agent has a tab open
+    assert sorted(visible_usage(usage, claude_only, {**show, "usage_follows_tabs": False})) == ["claude", "codex"]
+    assert sorted(visible_usage(usage, [], {"claude_usage": True, "codex_usage": True})) == ["claude", "codex"]
+    # opted in: Codex closed, its meter goes with it, however true the number still is.
     assert list(visible_usage(usage, claude_only, show)) == ["claude"]
     assert sorted(visible_usage(usage, both, show)) == ["claude", "codex"]
     assert visible_usage(usage, [], show) == {}

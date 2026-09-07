@@ -51,6 +51,7 @@ DEFAULT_SETTINGS = {
     "notch_show_claude_usage": True,
     "notch_show_codex_usage": True,
     "notch_show_accent": True,      # the agent's colour as a cap on each bar
+    "notch_show_usage_follows_tabs": False,  # hide an agent's limit meter while it has no tab open
     "log_events": True,
     # No flashing (or no light at all) between these hours. Local time, and a
     # window that wraps midnight is the normal case.

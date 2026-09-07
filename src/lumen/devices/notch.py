@@ -62,7 +62,7 @@ SIZES = {"thin": (16, 4, 200), "regular": (HEIGHT, BAR_H, WIDTH), "thick": (34, 
 # Everything the tab can show, all on by default. Settings turns pieces off:
 # someone who only wants the Claude limits and the live tabs unticks the rest.
 SHOW_DEFAULTS = {"sessions": True, "context": True, "cost": True, "activity": True,
-                 "claude_usage": True, "codex_usage": True, "accent": True}
+                 "claude_usage": True, "codex_usage": True, "accent": True, "usage_follows_tabs": False}
 PULSE_S = 1.6                # a tab that just started waiting on you breathes this long
 
 
@@ -219,8 +219,9 @@ def visible_usage(usage: dict, sessions: list[dict], show: dict, agents: str = "
     and pointing the tab at one agent hides the other's meter as well as its
     rows."""
     live = {str(s.get("agent") or "") for s in sessions if isinstance(s, dict)}
+    follow = show.get("usage_follows_tabs", False)  # the 0.7.1 rule, now opt-in: hide a closed agent's meter
     return {a: s for a, s in usage.items()
-            if a in live and show.get(f"{a}_usage", True) and (agents == "all" or a == agents)}
+            if (a in live or not follow) and show.get(f"{a}_usage", True) and (agents == "all" or a == agents)}
 
 
 def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:

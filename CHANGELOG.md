@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-09-07
+
+### Changed
+- **Both agents' limits stay on the status tab.** Since 0.7.1 a limit meter
+  was hidden while its agent had no tab open, which read as "Codex disappears
+  when I pick Claude". A known limit now stays up regardless; the old
+  behaviour is a tick under What it shows → "Limits only while that agent has
+  a tab open".
+
 ## [0.7.4] — 2026-09-07
 
 ### Added
