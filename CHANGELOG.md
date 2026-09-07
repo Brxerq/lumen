@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-09-07
+
 ### Fixed
 - **Claude limits show again on machines that only use the desktop app.** Only
   the `claude` CLI rotates the token in `~/.claude/.credentials.json`; the
