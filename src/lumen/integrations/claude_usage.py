@@ -208,9 +208,11 @@ def summarize(raw: dict) -> dict:
         kind = item["kind"]
         # a scoped week names its model in `scope` ("weekly_scoped" + Fable ->
         # seven_day_fable); the unscoped kinds carry the name in the kind itself
-        scope = item.get("scope") if isinstance(item.get("scope"), dict) else {}
-        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
-        name = model.get("display_name") if isinstance(model.get("display_name"), str) else ""
+        scope = item.get("scope")
+        model = scope.get("model") if isinstance(scope, dict) else None
+        name = model.get("display_name") if isinstance(model, dict) else None
+        if not isinstance(name, str):
+            name = ""
         tail = "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_") or kind.removeprefix("weekly_")
         ours = KINDS.get(kind) or ("seven_day_" + tail if kind.startswith("weekly_") else None)
         used = _pct(item.get("percent", item.get("utilization")))
