@@ -217,6 +217,16 @@ def test_spawn_swapper_waits_for_this_process_then_moves_the_file(tmp_path, monk
     assert "timeout /t" not in body
     assert ("ping -n" in body) if update.sys.platform == "win32" else ("sleep " in body)
     assert "6733" in body  # the port it probes for, so a dead start is retried
+    if update.sys.platform == "win32":
+        # The restart is handed to the Task Scheduler rather than started as a
+        # child: spawned by the frozen, windowed daemon, `start` and
+        # Start-Process both inherited enough from it that the new binary never
+        # came up, while the same script run from a console did.
+        assert "schtasks /run" in body and "schtasks /delete" in body
+        assert "Start-Process" not in body
+        # Every log line needs the space: `retry %tries%>>"log"` expands to
+        # `retry 1>>"log"`, and cmd eats the digit as a stream number.
+        assert ">>" in body and "%>>" not in body
 
 
 def test_hook_command_quotes_the_interpreter():

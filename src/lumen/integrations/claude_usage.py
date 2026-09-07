@@ -27,17 +27,24 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 WINDOWS = {"five_hour": "five_hour", "seven_day": "seven_day"}  # response key -> ours
 POLL_S = 300
+# How old the last good reading may be before we stop showing it. Four missed
+# polls: long enough that one flaky request or a laptop waking up does not blank
+# the meters, short enough that a login which went stale (Lumen never refreshes
+# the token, so an expired one stays expired) stops being reported as current
+# within half an hour. A number nobody can tell is hours old is worse than none.
+STALE_S = 4 * POLL_S
 
 _lock = threading.Lock()
 _latest: dict | None = None
+_latest_at = 0.0
 _detail = "not checked yet"
 _samples: list[tuple[float, int]] = []  # (ts, five_hour used) — the burn rate window
 SAMPLES = 12
 
 
-def latest() -> dict | None:
+def latest(now: float | None = None) -> dict | None:
     with _lock:
-        if not _latest:
+        if not _latest or (now or time.time()) - _latest_at > STALE_S:
             return None
         out = dict(_latest)
     eta = eta_full()
@@ -132,7 +139,7 @@ def summarize(raw: dict) -> dict:
 
 def refresh(now: float | None = None) -> dict | None:
     """One poll: read the login, ask, remember. Returns the new summary (None = nothing usable)."""
-    global _latest, _detail
+    global _latest, _latest_at, _detail
     creds = credentials(now)
     if creds is None:
         with _lock:
@@ -148,6 +155,7 @@ def refresh(now: float | None = None) -> dict | None:
     with _lock:
         if summary is not None:
             _latest = summary
+            _latest_at = time.time() if now is None else now
             used = (summary.get("five_hour") or {}).get("used")
             if isinstance(used, int):
                 _samples.append((time.time() if now is None else now, used))

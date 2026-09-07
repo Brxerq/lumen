@@ -48,6 +48,22 @@ def test_refresh_remembers_the_last_good_answer(monkeypatch):
     assert cu.refresh() is None and "sign in" in cu.detail()
 
 
+def test_a_stale_reading_is_not_passed_off_as_current(monkeypatch):
+    """The login expires, every poll fails, and the last good numbers must stop
+    being shown — a frozen "58%" reads as now, not as hours ago."""
+    monkeypatch.setattr(cu, "_latest", None)
+    monkeypatch.setattr(cu, "_samples", [])
+    monkeypatch.setattr(cu, "credentials", lambda now=None: {"accessToken": "tok"})
+    monkeypatch.setattr(cu, "fetch", lambda token, timeout=10: {"five_hour": {"utilization": 58}})
+    cu.refresh(now=1_000)
+    assert cu.latest(now=1_000 + cu.STALE_S)["five_hour"]["used"] == 58   # still inside the window
+    assert cu.latest(now=1_000 + cu.STALE_S + 1) is None                  # past it: nothing rather than an old number
+    monkeypatch.setattr(cu, "credentials", lambda now=None: None)         # login gone; _latest is left alone
+    assert cu.refresh(now=1_000) is None
+    assert cu.latest(now=1_000 + cu.STALE_S + 1) is None
+    assert "sign in with Claude Code" in cu.detail()
+
+
 def test_reset_countdown_reads_like_a_person_would_say_it():
     assert cu.resets_in(None) == ""
     assert cu.resets_in(100 + 35 * 60, now=100) == "35m"
@@ -72,9 +88,9 @@ def test_burn_rate_needs_two_rising_samples(monkeypatch):
     assert cu.eta_full() is None                      # one sample says nothing about a rate
     cu.refresh(now=100)                               # +10% in 100s -> 80% left = 800s
     assert cu.eta_full() == 800
-    assert cu.latest()["eta_full_s"] == 800
+    assert cu.latest(now=100)["eta_full_s"] == 800
     cu.refresh(now=200)                               # usage fell (the window reset): no ETA
-    assert cu.eta_full() is None and "eta_full_s" not in cu.latest()
+    assert cu.eta_full() is None and "eta_full_s" not in cu.latest(now=200)
     # the window stays small no matter how long the daemon runs
     for i in range(30):
         cu.refresh(now=1000 + i)

@@ -134,26 +134,39 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
         # leave a PyInstaller bootloader that never spawns the app — one idle
         # process, no listener, which a name check reads as success.
         #
-        # The relaunch goes through PowerShell's Start-Process, not cmd's
-        # `start`. Measured on the machine where this kept failing: `start` from
-        # this console-less script never produced a working daemon (three
-        # updates, three times nothing), while Start-Process had the port open
-        # 2.5s later, every time. Start-Process gives the new process a clean
-        # environment instead of handing it whatever this script inherited from
-        # a windowed parent with no valid stdio.
+        # The relaunch goes through a one-shot Scheduled Task, not cmd's `start`
+        # and not PowerShell's Start-Process. Both of those start the new binary
+        # as a descendant of this script, which is a child of the frozen,
+        # windowed daemon: no console, no valid stdio, and whatever else that
+        # parent was holding. The identical generated script run by hand from a
+        # console brought Lumen up in 6.6s; spawned by the daemon it never came
+        # up at all, so what is inherited is the difference, not the launcher.
+        # schtasks hands the exe to the Task Scheduler service, which starts it
+        # in a clean interactive session with nothing of ours attached. A
+        # user-level task needs no elevation; it is deleted again on the way out.
+        #
+        # Note the space before every `>>`: `retry %tries% >>"log"` expands to
+        # `retry 1>>"log"`, and cmd reads that trailing digit as a stream number
+        # rather than as text. That is why the counter looked empty in the log
+        # and why attempts 2 and 3 left no line there at all.
         #
         # Whatever happens is appended to update.log next to the config, because
         # a failed update takes the dashboard with it: without this the only
         # evidence is that Lumen is gone.
-        launch = ("powershell -NoProfile -WindowStyle Hidden -Command "
-                  f"\"Start-Process -FilePath '{exe}'\"")
+        task = "LumenUpdateRestart"
+        # /st is required but never fires: the task is triggered by /run below
+        # and deleted once the dashboard answers. Single-quoting the path is
+        # what makes schtasks store it as one quoted Command, so a path with
+        # spaces is not split into command + arguments.
+        launch = (f"schtasks /create /tn {task} /tr \"'{exe}'\" /sc once /st 23:59 /f >nul 2>&1\r\n"
+                  f"schtasks /run /tn {task} >nul 2>&1")
         probe = f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul"
         log = str(paths.data_dir() / "update.log")
         script.write_text(
             "@echo off\r\n"
             f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
             f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
-            f"echo %DATE% %TIME% swapped in the new binary>>\"{log}\"\r\n"
+            f"echo %DATE% %TIME% swapped in the new binary >>\"{log}\"\r\n"
             "ping -n 4 127.0.0.1 >nul\r\n"
             "set /a tries=0\r\n"
             f":launch\r\n{launch}\r\n"
@@ -168,12 +181,13 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
             # Only now is it really dead: clear whatever half-started and retry.
             f"taskkill /f /im \"{exe.name}\" >nul 2>&1\r\n"
             "set /a tries+=1\r\n"
-            f"echo %DATE% %TIME% no dashboard on port {port} after 30s, retry %tries%>>\"{log}\"\r\n"
+            f"echo %DATE% %TIME% no dashboard on port {port} after 30s, retry %tries% >>\"{log}\"\r\n"
             "if %tries% LSS 3 goto launch\r\n"
-            f"echo %DATE% %TIME% GAVE UP - start Lumen by hand>>\"{log}\"\r\n"
+            f"echo %DATE% %TIME% GAVE UP - start Lumen by hand >>\"{log}\"\r\n"
             "goto end\r\n"
-            f":done\r\necho %DATE% %TIME% up and answering on port {port}>>\"{log}\"\r\n"
+            f":done\r\necho %DATE% %TIME% up and answering on port {port} >>\"{log}\"\r\n"
             ":end\r\n"
+            f"schtasks /delete /tn {task} /f >nul 2>&1\r\n"
             # newline="": the lines above already end in CRLF, and text mode
             # would translate each one again into CR CR LF.
             "del \"%~f0\"\r\n", encoding="utf-8", newline="")

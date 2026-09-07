@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from lumen.integrations.claude_usage import _when
+from lumen.integrations.claude_usage import STALE_S, _when
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 AUTH_FILE = Path.home() / ".codex" / "auth.json"
@@ -41,12 +41,19 @@ POLL_S = 300
 
 _lock = threading.Lock()
 _latest: dict | None = None
+_latest_at = 0.0
 _detail = "not checked yet"
 
 
-def latest() -> dict | None:
+def latest(now: float | None = None) -> dict | None:
+    """The last good reading, or None once it is older than STALE_S — the same
+    staleness rule as Claude's, for the same reason: an expired Codex login
+    keeps failing, and the meter should go quiet rather than keep showing what
+    the numbers were when it last worked."""
     with _lock:
-        return dict(_latest) if _latest else None
+        if not _latest or (now or time.time()) - _latest_at > STALE_S:
+            return None
+        return dict(_latest)
 
 
 def detail() -> str:
@@ -134,7 +141,7 @@ def summarize(raw: dict, now: float | None = None) -> dict:
 
 def refresh(now: float | None = None) -> dict | None:
     """One poll: read the login, ask, remember. Returns the new summary (None = nothing usable)."""
-    global _latest, _detail
+    global _latest, _latest_at, _detail
     creds = credentials()
     if creds is None:
         with _lock:
@@ -150,5 +157,6 @@ def refresh(now: float | None = None) -> dict | None:
     with _lock:
         if summary is not None:
             _latest = summary
+            _latest_at = time.time() if now is None else now
         _detail = note
     return summary

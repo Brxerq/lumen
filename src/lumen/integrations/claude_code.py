@@ -122,6 +122,10 @@ class ClaudeCode(AgentIntegration):
         if usage:
             parts = [f"{name} {usage[k]['used']}%" for k, name in (("five_hour", "5h"), ("seven_day", "7d")) if k in usage]
             out["detail"] += " · " + " · ".join(parts)
+        else:
+            # No numbers rather than old ones: say why, so the row does not just
+            # go blank when the login expires.
+            out["detail"] += " · limits unavailable — " + claude_usage.detail()
         out["usage"] = usage
         return out
 

@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-09-07
+
+### Fixed
+- **Updating restarts Lumen again.** Pressing Update swapped the binary in
+  correctly and then left the machine with nothing running, every time. The
+  swap script relaunched the new binary as its own child, and spawned by the
+  frozen, windowed daemon that never worked — the identical script run from a
+  console brought Lumen up in seconds. The restart is now handed to a one-shot
+  Windows Scheduled Task, which starts it in a clean session with nothing
+  inherited from us, and the task is deleted again once the dashboard answers.
+- **The update log records what actually happened.** `retry %tries%>>"log"`
+  expands to `retry 1>>"log"`, so cmd read the counter as a stream number and
+  ate it: the first retry logged a blank number and the second and third logged
+  nothing at all, which made one failed attempt look like three.
+- **Usage meters go quiet instead of freezing.** When the Claude or Codex login
+  stopped working, the last good reading stayed on the status tab and the
+  Integrations page indefinitely, presented as current — a "58%" from hours ago
+  is worse than no number. A reading older than twenty minutes (four missed
+  polls) is now dropped, and the row says why the limits are unavailable.
+
 ## [0.7.1] — 2026-09-07
 
 ### Fixed
@@ -415,6 +435,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.7.2]: https://github.com/Brxerq/lumen/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/Brxerq/lumen/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Brxerq/lumen/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Brxerq/lumen/compare/v0.6.2...v0.6.3
