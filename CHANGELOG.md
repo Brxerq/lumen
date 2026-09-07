@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-09-07
+
+### Added
+- **The status tab can live on the left or right edge.** Settings → Where it
+  sits gains Left edge and Right edge: the folded tab lies along the edge on
+  its side, and hovering opens the panel upright beside it. Dragging moves it
+  up and down the edge, and the offset is saved the same way.
+- **Each bar wears its agent's colour.** A small cap at the leading end of a
+  bar — Claude orange, Codex blue — says whose tab it is, whatever state the
+  bar itself shows. Settings → What it shows → "Agent colour on each bar".
+- **Hide when idle.** Settings → Hide when idle takes a number of minutes; once
+  no tab has been working or waiting on you for that long, the tab goes away
+  and comes back the moment an agent does something. 0 (the default) keeps it up.
+
 ## [0.7.3] — 2026-09-07
 
 ### Fixed

@@ -36,7 +36,8 @@ DEFAULT_SETTINGS = {
     "webhook_token": "",          # if set, POST /api/events must send it as a bearer token
     "launch_openrgb": True,       # start the OpenRGB server if the app is installed but idle
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)
-    "notch_position": "top",      # top | top-left | top-right | bottom
+    "notch_position": "top",      # top | top-left | top-right | bottom | left | right
+    "notch_idle_hide_min": 0,     # hide the tab once no agent has done anything for N minutes; 0 = never
     "notch_offset": -1,           # where along the edge, 0..100 % of the screen width; -1 = the preset above
     "notch_size": "regular",      # thin | regular | thick
     "notch_opacity": 96,          # 30..100 %
@@ -49,6 +50,7 @@ DEFAULT_SETTINGS = {
     "notch_show_activity": True,
     "notch_show_claude_usage": True,
     "notch_show_codex_usage": True,
+    "notch_show_accent": True,      # the agent's colour as a cap on each bar
     "log_events": True,
     # No flashing (or no light at all) between these hours. Local time, and a
     # window that wraps midnight is the normal case.
@@ -60,7 +62,7 @@ _HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 # Settings a user can put out of range. Values outside these bounds are refused
 # rather than clamped: a silently moved port is worse than an error message.
 SETTING_RANGES = {"port": (1024, 65535), "rescan_interval_s": (0, 86400),
-                  "notch_offset": (-1, 100), "notch_opacity": (30, 100)}
+                  "notch_offset": (-1, 100), "notch_opacity": (30, 100), "notch_idle_hide_min": (0, 1440)}
 
 
 def _coerce(key: str, value):
@@ -73,8 +75,8 @@ def _coerce(key: str, value):
         value = type(default)(value)
     except (TypeError, ValueError):
         raise ValueError(f"{key}: expected {type(default).__name__}") from None
-    if key == "notch_position" and value not in ("top", "top-left", "top-right", "bottom"):
-        raise ValueError("notch_position: top, top-left, top-right or bottom")
+    if key == "notch_position" and value not in ("top", "top-left", "top-right", "bottom", "left", "right"):
+        raise ValueError("notch_position: top, top-left, top-right, bottom, left or right")
     if key == "notch_agents" and value not in ("all", "claude", "codex"):
         raise ValueError("notch_agents: all, claude or codex")
     if key == "notch_size" and value not in ("thin", "regular", "thick"):
