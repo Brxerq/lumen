@@ -89,8 +89,19 @@ class Engine:
         self._sync_player()
         self.player.repaint()
         self.bump()
-        # a built-in the user switched on or off (the notch tab) appears or goes on the next scan
-        threading.Thread(target=self.scan, name="lumen-settings-scan", daemon=True).start()
+
+        def rescan_then_repaint() -> None:
+            # A built-in the user switched on or off (the notch tab) appears or
+            # goes here, and settings that live *on* a device — where the status
+            # tab sits, which meters it shows, whose sessions it follows — are
+            # read by its discover(). So the repaint above can only show the old
+            # values: it ran before this. Repainting again once the scan has
+            # settled is what makes the change visible now, rather than whenever
+            # the next event happens to write to the device.
+            self.scan()
+            self.player.repaint()
+
+        threading.Thread(target=rescan_then_repaint, name="lumen-settings-scan", daemon=True).start()
 
     def request_exit(self) -> None:
         """Ask the host process to shut down cleanly (after the response is sent)."""

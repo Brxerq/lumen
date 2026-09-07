@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-07
+
+### Fixed
+- **A settings change shows on the device straight away.** Settings that live
+  on a device — where the status tab sits, which meters it shows, whose
+  sessions it follows — are read when that device is discovered, but the
+  repaint that would show them ran *before* the rescan that reads them. The
+  first repaint could only carry the old values, so the change waited for
+  whatever event next happened to write to the device: a minute, or until an
+  agent tab did something. The repaint now happens again once the rescan has
+  settled.
+
 ## [0.6.1] — 2026-09-07
 
 ### Fixed
@@ -352,6 +364,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.6.2]: https://github.com/Brxerq/lumen/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Brxerq/lumen/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Brxerq/lumen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Brxerq/lumen/compare/v0.4.0...v0.5.0

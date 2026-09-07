@@ -224,6 +224,35 @@ def test_engine_reapplies_edited_rules_immediately(tmp_path):
     engine.stop()
 
 
+def test_settings_change_repaints_after_the_rescan_reads_it(tmp_path):
+    """A setting a device reads in discover() has to be visible straight away.
+
+    apply_settings() repaints and *then* rescans, so that first repaint can only
+    carry the old value; without a second one the change waited for whatever
+    event next wrote to the device."""
+    from lumen.core.engine import Engine
+    light = FakeLight("light")
+    seen: list[str] = []
+
+    def discover(settings):
+        light.position = settings.get("notch_position", "top")  # stand-in for a device-held setting
+        return [light]
+
+    engine = Engine(Config(tmp_path / "config.json"), integrations=[], discover=discover)
+    engine.start()
+    engine.emit("agents.status", {"status": "running"})
+    light.set_color = lambda rgb, _l=light: (seen.append(_l.position), FakeLight.set_color(_l, rgb))[1]
+
+    engine.config.update_settings({"notch_position": "bottom"})
+    engine.apply_settings()
+    for _ in range(100):  # the rescan runs on its own thread
+        if "bottom" in seen:
+            break
+        time.sleep(0.05)
+    assert "bottom" in seen, f"repainted only with stale settings: {seen}"
+    engine.stop()
+
+
 def test_config_roundtrip(tmp_path):
     c = Config(tmp_path / "config.json")
     assert c.settings["port"] == 6733 and len(c.rules) == 6 and not c.data["onboarded"]
