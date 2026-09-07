@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-07
+
 ### Added
 - **The status tab acts, moves and breathes.** Click a session row and that
   tab's terminal or IDE comes to the front (Windows, macOS with System
@@ -332,6 +334,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.6.0]: https://github.com/Brxerq/lumen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Brxerq/lumen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Brxerq/lumen/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Brxerq/lumen/releases/tag/v0.3.1
