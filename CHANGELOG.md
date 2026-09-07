@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-09-07
+
+### Fixed
+- **A limit meter only shows while that agent is open.** Codex's weekly limit sat
+  on the status tab hours after Codex had been closed. The number was true — the
+  limit is account-wide and does not care whether anything is running — but the
+  tab is a picture of what is happening now, so a meter for an agent with no tabs
+  open reads as stale data rather than as information. Close Codex and its meter
+  goes with it; open it again and it comes back; with both open you see both.
+
 ## [0.7.0] — 2026-09-07
 
 ### Added
@@ -405,6 +415,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.7.1]: https://github.com/Brxerq/lumen/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Brxerq/lumen/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Brxerq/lumen/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Brxerq/lumen/compare/v0.6.1...v0.6.2

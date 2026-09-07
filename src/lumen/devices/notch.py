@@ -189,6 +189,21 @@ def apply_show(rows: list[tuple], show: dict, agents: str = "all") -> list[tuple
     return out
 
 
+def visible_usage(usage: dict, sessions: list[dict], show: dict, agents: str = "all") -> dict:
+    """Which limit meters belong on the tab right now.
+
+    A meter follows its agent's tabs. The limit itself is account-wide and stays
+    true whether or not anything is open — but the tab is a picture of what is
+    happening now, and a Codex meter still sitting there hours after Codex was
+    closed reads as stale data, not as information. Close Codex and its meter
+    goes; open it again and it comes back. Settings can switch either meter off,
+    and pointing the tab at one agent hides the other's meter as well as its
+    rows."""
+    live = {str(s.get("agent") or "") for s in sessions if isinstance(s, dict)}
+    return {a: s for a, s in usage.items()
+            if a in live and show.get(f"{a}_usage", True) and (agents == "all" or a == agents)}
+
+
 def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:
     """"r g b [r g b ...]" as exactly n zones (padded with the last colour), or None."""
     try:
@@ -600,12 +615,7 @@ def run_child() -> int:
         rows = apply_show(session_rows(state["sessions"]), flags, str(opts.get("agents") or "all"))
         if not flags.get("sessions", True):
             rows = []
-        # The agent filter has to reach the meters too: pointing the tab at
-        # Claude and still being shown Codex's limit is what "only Claude" was
-        # meant to stop.
-        only = str(opts.get("agents") or "all")
-        usage = {a: s for a, s in state["usage"].items()
-                 if flags.get(f"{a}_usage", True) and (only == "all" or a == only)}
+        usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"))
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
         left = state["pulse_until"] - time.time()
