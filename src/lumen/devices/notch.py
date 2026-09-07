@@ -52,6 +52,10 @@ KEY = (1, 0, 1)              # Windows chroma key; on macOS the window is truly 
 LABELS = {"running": "working", "input": "needs you", "done": "done"}
 SS = 3                       # supersample factor for Pillow drawing
 POSITIONS = ("top", "top-left", "top-right", "bottom")
+# Everything the tab can show, all on by default. Settings turns pieces off:
+# someone who only wants the Claude limits and the live tabs unticks the rest.
+SHOW_DEFAULTS = {"sessions": True, "context": True, "cost": True, "activity": True,
+                 "claude_usage": True, "codex_usage": True}
 PULSE_S = 1.6                # a tab that just started waiting on you breathes this long
 
 
@@ -83,6 +87,8 @@ class Notch(ScreenGlow):
         self.ambient = True  # its whole purpose is the persistent sessions view
         self.details = {"connection": "built-in", "zones": ZONE_COUNT}
         self.position, self.hide_fullscreen = "top", True
+        self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
+        self.agents = "all"               # whose sessions: all | claude | codex
 
     def child_command(self) -> list[str]:
         return child_command()
@@ -91,10 +97,12 @@ class Notch(ScreenGlow):
         self.set_zones([tuple(rgb)] * ZONE_COUNT)
 
     def set_zones(self, colors: list[RGB]) -> None:
-        from lumen.integrations import claude_usage
+        from lumen.integrations import claude_usage, codex_usage
         from lumen.integrations.agent_sessions import all_sessions
-        payload = {"sessions": all_sessions(), "usage": claude_usage.latest(),
-                   "options": {"position": self.position, "hide_fullscreen": self.hide_fullscreen}}
+        payload = {"sessions": all_sessions(),
+                   "usage": {"claude": claude_usage.latest(), "codex": codex_usage.latest()},
+                   "options": {"position": self.position, "hide_fullscreen": self.hide_fullscreen,
+                               "show": self.show, "agents": self.agents}}
         self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
 
@@ -118,6 +126,9 @@ def discover(settings: dict | None = None) -> list:
     position = str((settings or {}).get("notch_position") or "top")
     _instance.position = position if position in POSITIONS else "top"
     _instance.hide_fullscreen = bool((settings or {}).get("notch_hide_fullscreen", True))
+    _instance.show = {k: bool((settings or {}).get(f"notch_show_{k}", v)) for k, v in SHOW_DEFAULTS.items()}
+    agents = str((settings or {}).get("notch_agents") or "all")
+    _instance.agents = agents if agents in ("all", "claude", "codex") else "all"
     _instance.connected = True
     _instance.warm_up()
     return [_instance]
@@ -145,9 +156,37 @@ def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict], d
     usage = payload.get("usage") or {}
     options = payload.get("options") or {}
     return (zones, [s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else [],
-            {k: v for k, v in usage.items() if isinstance(v, dict) and isinstance(v.get("used"), (int, float))}
-            if isinstance(usage, dict) else {},
-            options if isinstance(options, dict) else {})
+            clean_usage(usage), options if isinstance(options, dict) else {})
+
+
+def clean_usage(usage) -> dict:
+    """Usage as {agent: summary}. A bare summary (the 0.5 daemon) is Claude's;
+    blocks without a numeric "used" are dropped."""
+    if not isinstance(usage, dict):
+        return {}
+    if "five_hour" in usage or "seven_day" in usage:
+        usage = {"claude": usage}
+    out = {}
+    for agent, summary in usage.items():
+        if not isinstance(summary, dict):
+            continue
+        blocks = {k: v for k, v in summary.items() if isinstance(v, dict) and isinstance(v.get("used"), (int, float))}
+        if blocks:
+            out[str(agent)] = blocks
+    return out
+
+
+def apply_show(rows: list[tuple], show: dict, agents: str = "all") -> list[tuple]:
+    """Trim the session rows to what Settings asks for: only one agent's tabs,
+    and without context / cost / activity when those are switched off."""
+    keep = lambda k: show.get(k, True)
+    out = []
+    for agent, name, status, pct, activity, cost in rows:
+        if agents != "all" and agent != agents:
+            continue
+        out.append((agent, name, status, pct if keep("context") else None,
+                    activity if keep("activity") else "", cost if keep("cost") else None))
+    return out
 
 
 def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:
@@ -242,10 +281,17 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
 
     from lumen.integrations.claude_usage import resets_in
 
-    usage = usage or {}
-    meters = [(name, usage[k]) for k, name in (("five_hour", "Session · 5 hours"), ("seven_day", "Week · 7 days"))
-              if k in usage] if unfolded else []
-    five = usage.get("five_hour", {}).get("used") if usage else None
+    # usage is one agent's summary, or {agent: summary} for several; the first
+    # agent with a 5-hour figure owns the number on the folded tab
+    by_agent = clean_usage(usage or {})
+    meters = []
+    if unfolded:
+        for agent, summary in by_agent.items():
+            who = agent.capitalize() if len(by_agent) > 1 else "Session"
+            for k, name in (("five_hour", f"{who} · 5 hours"), ("seven_day", f"{who} · 7 days" if len(by_agent) > 1 else "Week · 7 days")):
+                if k in summary:
+                    meters.append((name, summary[k]))
+    five = next((s["five_hour"]["used"] for s in by_agent.values() if "five_hour" in s), None)
     w = PANEL_WIDTH if unfolded else WIDTH
     h = HEIGHT
     if unfolded:
@@ -549,12 +595,17 @@ def run_child() -> int:
         if all(z == (0, 0, 0) for z in zones) or state["fullscreen"]:
             hide()
             return
-        rows = session_rows(state["sessions"])
+        opts = state["options"]
+        flags = {**SHOW_DEFAULTS, **(opts.get("show") if isinstance(opts.get("show"), dict) else {})}
+        rows = apply_show(session_rows(state["sessions"]), flags, str(opts.get("agents") or "all"))
+        if not flags.get("sessions", True):
+            rows = []
+        usage = {a: s for a, s in state["usage"].items() if flags.get(f"{a}_usage", True)}
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
         left = state["pulse_until"] - time.time()
         gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
-        show(render(zones, rows, DEFAULT_PALETTE, key, fills, state["usage"], unfolded=state["hover"],
+        show(render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
                     flip=position() == "bottom", glow_gain=gain))
         try:
             win.attributes("-alpha", ALPHA)

@@ -37,6 +37,14 @@ DEFAULT_SETTINGS = {
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)
     "notch_position": "top",      # top | top-left | top-right | bottom
     "notch_hide_fullscreen": True,  # stay out of the way of full-screen games and films
+    # what the tab shows; untick down to "just my Claude limits and the live tabs"
+    "notch_agents": "all",          # all | claude | codex
+    "notch_show_sessions": True,
+    "notch_show_context": True,
+    "notch_show_cost": True,
+    "notch_show_activity": True,
+    "notch_show_claude_usage": True,
+    "notch_show_codex_usage": True,
     "log_events": True,
     # No flashing (or no light at all) between these hours. Local time, and a
     # window that wraps midnight is the normal case.
@@ -62,6 +70,8 @@ def _coerce(key: str, value):
         raise ValueError(f"{key}: expected {type(default).__name__}") from None
     if key == "notch_position" and value not in ("top", "top-left", "top-right", "bottom"):
         raise ValueError("notch_position: top, top-left, top-right or bottom")
+    if key == "notch_agents" and value not in ("all", "claude", "codex"):
+        raise ValueError("notch_agents: all, claude or codex")
     if key in SETTING_RANGES:
         low, high = SETTING_RANGES[key]
         assert isinstance(value, int)

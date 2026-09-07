@@ -25,6 +25,11 @@ All notable changes to this project are documented here. The format follows [Kee
   starts with `>=`, `<=`, `>` or `<` compares as a number. Both cards on the
   Integrations page show the two limits as meters, with a burn-rate line
   ("at this pace, full in 1h 40m") once a few samples are in.
+- **Choose what the status tab shows.** Settings → "Whose tabs" (Claude, Codex
+  or both) and "What it shows" (live tabs, activity, context window, session
+  cost, Claude limits, Codex limits) — untick down to just the Claude 5-hour
+  and 7-day limits and the live tabs if that is all you want. Both agents'
+  limits are labelled separately when both are on.
 - **Log viewer.** Settings → Advanced → Log shows the tail of `lumen.log`
   in the dashboard, so a Mac problem can be read without hunting for a file.
 - **`lumen selfcheck`** imports every adapter and integration and draws the

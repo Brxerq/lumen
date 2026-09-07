@@ -110,7 +110,14 @@ def test_notch_child_parses_zones_and_the_session_list():
     payload = {"sessions": sessions, "usage": {"five_hour": {"used": 23, "resets_at": 1.0}, "junk": 1, "seven_day": {"x": 1}},
                "options": {"position": "bottom"}}
     zones, got, usage, opts = notch.parse_line("1 2 3 | " + json.dumps(payload), n=2)
-    assert [s["id"] for s in got] == ["b", "a"] and usage == {"five_hour": {"used": 23, "resets_at": 1.0}}
+    assert [s["id"] for s in got] == ["b", "a"] and usage == {"claude": {"five_hour": {"used": 23, "resets_at": 1.0}}}
+    both = {"claude": {"five_hour": {"used": 1}}, "codex": {"seven_day": {"used": 2}, "x": 3}, "bad": "no"}
+    assert notch.clean_usage(both) == {"claude": {"five_hour": {"used": 1}}, "codex": {"seven_day": {"used": 2}}}
+    # Settings trims what the rows carry, and whose tabs appear
+    rows = notch.session_rows(got)
+    trimmed = notch.apply_show(rows, {"context": False, "cost": False, "activity": False}, "codex")
+    assert trimmed == [("codex", "api", "input", None, "", None)]
+    assert notch.apply_show(rows, {}, "all") == rows
     assert opts == {"position": "bottom"}
     assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [], {}, {})   # a bad payload never kills the tab
     assert notch.parse_line("nope | []") is None
@@ -162,6 +169,14 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     d = notch.discover({"notch_position": "bottom", "notch_hide_fullscreen": False})[0]
     assert d.position == "bottom" and d.hide_fullscreen is False
     assert notch.discover({"notch_position": "sideways"})[0].position == "top"
+    d = notch.discover({"notch_show_cost": False, "notch_agents": "claude"})[0]
+    assert d.show["cost"] is False and d.show["sessions"] is True and d.agents == "claude"
+    assert notch.discover({"notch_agents": "everyone"})[0].agents == "all"
+    # both agents' limits render as separately labelled meters
+    two = notch.render([(1, 1, 1)] * 6, [], {}, usage={"claude": {"five_hour": {"used": 10}}, "codex": {"five_hour": {"used": 20}}},
+                       unfolded=True)
+    one = notch.render([(1, 1, 1)] * 6, [], {}, usage={"claude": {"five_hour": {"used": 10}}}, unfolded=True)
+    assert two.height > one.height > notch.HEIGHT
     # session ids map to the pid of the process that owns the tab (Claude's per-process files)
     (tmp_path := __import__("pathlib").Path(__import__("tempfile").mkdtemp())) / "sessions"
     (tmp_path / "sessions").mkdir()

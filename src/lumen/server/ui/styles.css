@@ -388,6 +388,9 @@ select.input.sm { padding-right: 26px; background-position: right 8px center; ba
 /* integrations */
 .integ { padding: 22px 24px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr auto; gap: 18px; }
 .rows > .integ:last-child { border-bottom: 0; }
+.checks { display: grid; gap: 7px; }
+.check { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--text); cursor: pointer; white-space: nowrap; }
+.check input { accent-color: var(--green-2); width: 15px; height: 15px; margin: 0; }
 .meters { margin-top: 12px; display: grid; gap: 9px; max-width: 520px; }
 .meter-head { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); margin-bottom: 5px; }
 .meter { height: 5px; border-radius: 999px; background: var(--panel-3); overflow: hidden; }
