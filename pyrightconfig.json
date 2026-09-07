@@ -3,7 +3,7 @@
   "venv": ".venv",
   "pythonVersion": "3.11",
   "extraPaths": ["src"],
-  "include": ["src/lumen/core", "src/lumen/server", "src/lumen/app", "src/lumen/cli.py", "src/lumen/paths.py"],
+  "include": ["src/lumen"],
   "exclude": ["**/__pycache__"],
   "reportMissingImports": "none"
 }

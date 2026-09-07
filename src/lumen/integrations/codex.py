@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 import time
 from contextlib import closing
 from pathlib import Path
 
+from lumen.core.events import Event
+from lumen.integrations import claude_usage, codex_usage
 from lumen.integrations.agent_sessions import CODEX_HOOKS, AgentIntegration
 
 CODEX_HOME = Path.home() / ".codex"
@@ -83,7 +86,7 @@ class Codex(AgentIntegration):
     agent = "codex"
     name = "Codex"
     description = "OpenAI's coding agent — CLI, VS Code extension, desktop app."
-    events = ("agent.running", "agent.needs_input", "agent.finished", "agents.status")
+    events = ("agent.running", "agent.needs_input", "agent.finished", "agents.status", "codex.usage")
     hooks_file = CODEX_HOME / "hooks.json"
     hooks = CODEX_HOOKS
     hooks_async = False  # Codex skips hooks marked async
@@ -93,6 +96,34 @@ class Codex(AgentIntegration):
 
     def truth(self, hooked: dict[str, str]) -> dict[str, bool]:
         return rollout_states(hooked=list(hooked))
+
+    def start(self) -> None:
+        super().start()
+        threading.Thread(target=self._usage_loop, name="lumen-codex-usage", daemon=True).start()
+
+    def _usage_loop(self) -> None:
+        """The 5-hour / weekly limits, every few minutes, as a codex.usage event when they move."""
+        last = None
+        while not self._stop.is_set():
+            try:
+                usage = codex_usage.refresh()
+            except Exception as e:  # never let the usage poll take the session poll down
+                usage = None
+                print(f"codex: usage poll failed: {type(e).__name__}: {e}", flush=True)
+            if usage is not None and usage != last:
+                last = usage
+                self.emit(Event("codex.usage", self.agent,
+                                {"agent": self.agent, **usage, **claude_usage.flat(usage)}))
+            self._stop.wait(codex_usage.POLL_S)
+
+    def status(self) -> dict:
+        out = super().status()
+        usage = codex_usage.latest()
+        if usage:
+            parts = [f"{name} {usage[k]['used']}%" for k, name in (("five_hour", "5h"), ("seven_day", "7d")) if k in usage]
+            out["detail"] += " · " + " · ".join(parts)
+        out["usage"] = usage
+        return out
 
 
 INTEGRATION = Codex

@@ -105,15 +105,24 @@ def test_notch_child_parses_zones_and_the_session_list():
     sessions = [{"id": "b", "agent": "codex", "slot": 1, "status": "input", "cwd": "/w/api", "label": "",
                  "context": {"tokens": 50_000, "window": 200_000}},
                 {"id": "a", "agent": "claude", "slot": 0, "status": "running", "cwd": "C:/w/web/", "label": "API refactor"}]
-    zones, got, usage = notch.parse_line("1 2 3 | " + json.dumps(sessions), n=2)   # the 0.4 shape: a bare list
-    assert zones == [(1, 2, 3)] * 2 and [s["id"] for s in got] == ["b", "a"] and usage == {}
-    payload = {"sessions": sessions, "usage": {"five_hour": {"used": 23, "resets_at": 1.0}, "junk": 1, "seven_day": {"x": 1}}}
-    zones, got, usage = notch.parse_line("1 2 3 | " + json.dumps(payload), n=2)
+    zones, got, usage, opts = notch.parse_line("1 2 3 | " + json.dumps(sessions), n=2)   # the 0.4 shape: a bare list
+    assert zones == [(1, 2, 3)] * 2 and [s["id"] for s in got] == ["b", "a"] and usage == {} and opts == {}
+    payload = {"sessions": sessions, "usage": {"five_hour": {"used": 23, "resets_at": 1.0}, "junk": 1, "seven_day": {"x": 1}},
+               "options": {"position": "bottom"}}
+    zones, got, usage, opts = notch.parse_line("1 2 3 | " + json.dumps(payload), n=2)
     assert [s["id"] for s in got] == ["b", "a"] and usage == {"five_hour": {"used": 23, "resets_at": 1.0}}
-    assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [], {})   # a bad payload never kills the tab
+    assert opts == {"position": "bottom"}
+    assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [], {}, {})   # a bad payload never kills the tab
     assert notch.parse_line("nope | []") is None
     # rows follow the zones (slot order); a named tab shows its name, an unnamed one its folder
-    assert notch.session_rows(got) == [("claude", "API refactor", "running", None), ("codex", "api", "input", 25)]
+    assert notch.session_rows(got) == [("claude", "API refactor", "running", None, "", None),
+                                       ("codex", "api", "input", 25, "", None)]
+    assert notch.session_rows([{"id": "x", "activity": "Editing a.py", "cost_usd": 1.25}])[0][4:] == ("Editing a.py", 1.25)
+    # a click lands on a row only inside the panel's row band
+    assert notch.panel_row_at(notch.HEIGHT + notch.PANEL_PAD + 1, 2) == 0
+    assert notch.panel_row_at(notch.HEIGHT + notch.PANEL_PAD + notch.ROW + 1, 2) == 1
+    assert notch.panel_row_at(notch.HEIGHT + notch.PANEL_PAD + 2 * notch.ROW + 1, 2) is None
+    assert notch.panel_row_at(3, 2) is None
     # adjacent zones of one colour are one tab's bar; black is a free seat, not a bar
     assert notch.runs([(1, 1, 1), (1, 1, 1), (0, 0, 0), (2, 2, 2)]) == [((1, 1, 1), 2), ((2, 2, 2), 1)]
 
@@ -121,7 +130,7 @@ def test_notch_child_parses_zones_and_the_session_list():
 def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     from lumen.devices import notch
     palette = {"running": (240, 170, 40), "input": (230, 60, 60)}
-    rows = [("claude", "web", "running", 63), ("codex", "api", "input", None)]
+    rows = [("claude", "web", "running", 63, "Editing api.py", 2.5), ("codex", "api", "input", None, "", None)]
     usage = {"five_hour": {"used": 23, "resets_at": 7200.0}, "seven_day": {"used": 91, "resets_at": None}}
     folded = notch.render([(240, 170, 40)] * 6, [], palette, opaque_key=(1, 0, 1), fills=[63], usage=usage)
     panel = notch.render([(240, 170, 40)] * 3 + [(230, 60, 60)] * 3, rows, palette, usage=usage, unfolded=True, now=0.0)
@@ -130,6 +139,9 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     assert folded.size == (notch.WIDTH, notch.HEIGHT) and panel.size[0] == notch.PANEL_WIDTH
     assert panel.height > bare.height > notch.HEIGHT and empty.height > notch.HEIGHT   # meters add rows; "no tabs" still opens
     assert notch.usage_colour(10) != notch.usage_colour(75) != notch.usage_colour(95)
+    bottom = notch.render([(1, 1, 1)] * 6, [], palette, flip=True, glow_gain=1.8)
+    assert bottom.getpixel((0, 0))[3] == 0 and bottom.getpixel((notch.WIDTH // 2, notch.HEIGHT - 1))[3] == 255  # rounded top, flat bottom
+    assert notch.self_check()
     assert folded.getpixel((0, notch.HEIGHT - 1))[:3] == (1, 0, 1)   # rounded corner shows the chroma key
     assert panel.getpixel((0, panel.height - 1))[3] == 0            # ...or real transparency
     d = notch.Notch()
@@ -139,7 +151,7 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     d.set_color((1, 2, 3))
     d.set_zones([(0, 0, 0), (9, 9, 9)])
     assert [x.split(" | ")[0] for x in sent] == ["1 2 3 " * (notch.ZONE_COUNT - 1) + "1 2 3", "0 0 0 9 9 9"]
-    assert all(set(json.loads(x.split(" | ")[1])) == {"sessions", "usage"} for x in sent)  # live sessions + limits ride along
+    assert all(set(json.loads(x.split(" | ")[1])) == {"sessions", "usage", "options"} for x in sent)  # sessions, limits, display options
     # the setting takes the tab down and keeps it down; no child is spawned in tests
     monkeypatch.setattr(notch.Notch, "warm_up", lambda self: None)
     shut = []
@@ -147,6 +159,18 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     assert [x.id for x in notch.discover({"notch": True})] == ["notch"]
     assert notch.discover({"notch": False}) == [] and shut == [1]
     assert [x.id for x in notch.discover()] == ["notch"]
+    d = notch.discover({"notch_position": "bottom", "notch_hide_fullscreen": False})[0]
+    assert d.position == "bottom" and d.hide_fullscreen is False
+    assert notch.discover({"notch_position": "sideways"})[0].position == "top"
+    # session ids map to the pid of the process that owns the tab (Claude's per-process files)
+    (tmp_path := __import__("pathlib").Path(__import__("tempfile").mkdtemp())) / "sessions"
+    (tmp_path / "sessions").mkdir()
+    (tmp_path / "sessions" / "1.json").write_text(json.dumps({"pid": 4242, "sessionId": "abc"}))
+    (tmp_path / "sessions" / "2.json").write_text("garbage")
+    assert notch.session_pids(tmp_path) == {"abc": 4242}
+    monkeypatch.setattr(notch, "session_pids", lambda home=None: {"abc": 4242})
+    monkeypatch.setattr(notch, "focus_pid", lambda pid: pid == 4242)
+    assert notch.focus_session({"id": "abc"}) and not notch.focus_session({"id": "zzz"})
 
 
 def test_adapter_setup_action_reaches_the_adapter(server, monkeypatch):

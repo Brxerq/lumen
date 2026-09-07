@@ -18,6 +18,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+from typing import Any
 
 from lumen.core.devices import COLOR, Device
 
@@ -44,7 +45,7 @@ class ScreenGlow(Device):
 
     def _child(self):
         if self._proc is None or self._proc.poll() is not None:
-            flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+            flags: dict[str, Any] = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
             self._proc = subprocess.Popen(self.child_command(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL, text=True, **flags)
         return self._proc
@@ -63,6 +64,7 @@ class ScreenGlow(Device):
         with self._lock:
             try:
                 child = self._child()
+                assert child.stdin is not None
                 child.stdin.write(line + "\n")
                 child.stdin.flush()
             except (OSError, ValueError) as e:
@@ -77,9 +79,11 @@ class ScreenGlow(Device):
         with self._lock:
             if self._proc and self._proc.poll() is None:
                 try:
+                    assert self._proc.stdin is not None
                     self._proc.stdin.close()
                     self._proc.wait(timeout=2)
                 except (OSError, subprocess.TimeoutExpired):
+                    assert self._proc is not None
                     self._proc.kill()
             self._proc = None
 

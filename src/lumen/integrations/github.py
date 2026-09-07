@@ -14,13 +14,14 @@ import shutil
 import subprocess
 import sys
 import threading
+from typing import Any
 
 from lumen.core.events import Event
 from lumen.core.integrations import Integration
 
 
 def list_runs(repo: str, limit: int = 10) -> list[dict]:
-    flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+    flags: dict[str, Any] = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
     out = subprocess.run(["gh", "run", "list", "--repo", repo, "--limit", str(limit),
                           "--json", "databaseId,status,conclusion,name,headBranch,workflowName"],
                          capture_output=True, text=True, timeout=30, **flags)

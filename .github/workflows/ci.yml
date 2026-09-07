@@ -31,6 +31,11 @@ jobs:
       - run: lumen scan
         env:
           LUMEN_HOME: ${{ runner.temp }}/lumen-home
+      # Every adapter and integration imports, and the status tab draws a frame
+      # without a display: the checks a frozen build must pass too (release.yml).
+      - run: lumen selfcheck
+        env:
+          LUMEN_HOME: ${{ runner.temp }}/lumen-home
 
   lint:
     runs-on: ubuntu-latest

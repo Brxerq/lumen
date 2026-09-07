@@ -141,9 +141,9 @@ class HueLight(Device):
         state = _http("GET", self._url).get("state", {})
         return {k: state[k] for k in ("on", "bri", "hue", "sat", "ct") if k in state}
 
-    def restore(self, saved) -> None:
+    def restore(self, saved: object) -> None:
         if saved:
-            _http("PUT", self._url + "/state", {**saved, "transitiontime": 2})
+            _http("PUT", self._url + "/state", {**(saved if isinstance(saved, dict) else {}), "transitiontime": 2})
 
 
 class UnpairedBridge(Device):

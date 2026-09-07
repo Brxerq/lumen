@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     auto = sub.add_parser("autostart", help="start Lumen at login")
     auto.add_argument("state", choices=["on", "off"])
     sub.add_parser("open", help="open the dashboard")
+    sub.add_parser("selfcheck", help="import every adapter and integration and draw the status tab off-screen (CI)")
     args = parser.parse_args(argv)
 
     if args.command in (None, "run"):
@@ -96,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         from lumen.app.tray import open_dashboard
         open_dashboard(_endpoint()[0])
         return 0
+    if args.command == "selfcheck":
+        return _selfcheck()
     parser.print_help()
     return 2
 
@@ -104,6 +107,29 @@ def _endpoint() -> tuple[int, str]:
     from lumen.core.config import Config
     settings = Config().settings
     return int(settings["port"]), str(settings.get("webhook_token", ""))
+
+
+def _selfcheck() -> int:
+    """What a frozen build must be able to do before it ships: every adapter and
+    integration imports (a missing hidden import shows here, not on a user's
+    Mac), and the status tab renders a frame without a display."""
+    from lumen.core.devices import BUILTIN_ADAPTERS, adapter_modules
+    from lumen.core.integrations import BUILTIN_INTEGRATIONS, integration_classes
+    from lumen.devices import notch
+    failures = []
+    if len(adapter_modules()) < len(BUILTIN_ADAPTERS):
+        failures.append("an adapter failed to import (see above)")
+    if len(integration_classes()) < len(BUILTIN_INTEGRATIONS):
+        failures.append("an integration failed to import (see above)")
+    try:
+        if not notch.self_check():
+            failures.append("notch render produced the wrong size")
+    except Exception as e:
+        failures.append(f"notch render failed: {type(e).__name__}: {e}")
+    for f in failures:
+        print(f"selfcheck: {f}")
+    print("selfcheck: ok" if not failures else f"selfcheck: {len(failures)} problem(s)")
+    return 0 if not failures else 1
 
 
 def _scan() -> int:

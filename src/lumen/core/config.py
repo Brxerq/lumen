@@ -35,6 +35,8 @@ DEFAULT_SETTINGS = {
     "webhook_token": "",          # if set, POST /api/events must send it as a bearer token
     "launch_openrgb": True,       # start the OpenRGB server if the app is installed but idle
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)
+    "notch_position": "top",      # top | top-left | top-right | bottom
+    "notch_hide_fullscreen": True,  # stay out of the way of full-screen games and films
     "log_events": True,
     # No flashing (or no light at all) between these hours. Local time, and a
     # window that wraps midnight is the normal case.
@@ -58,8 +60,11 @@ def _coerce(key: str, value):
         value = type(default)(value)
     except (TypeError, ValueError):
         raise ValueError(f"{key}: expected {type(default).__name__}") from None
+    if key == "notch_position" and value not in ("top", "top-left", "top-right", "bottom"):
+        raise ValueError("notch_position: top, top-left, top-right or bottom")
     if key in SETTING_RANGES:
         low, high = SETTING_RANGES[key]
+        assert isinstance(value, int)
         if not low <= value <= high:
             raise ValueError(f"{key}: must be between {low} and {high}")
     return value

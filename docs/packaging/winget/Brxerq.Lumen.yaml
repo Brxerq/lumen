@@ -1,0 +1,8 @@
+# winget manifest set (version manifest). Regenerate on each release with
+#   wingetcreate update Brxerq.Lumen --urls https://github.com/Brxerq/lumen/releases/download/vX.Y.Z/lumen.exe --version X.Y.Z
+# and submit the three files to microsoft/winget-pkgs. Requires a signed lumen.exe.
+PackageIdentifier: Brxerq.Lumen
+PackageVersion: 0.5.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

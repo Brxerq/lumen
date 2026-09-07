@@ -91,7 +91,7 @@ class Rule:
     def matches(self, event: Event) -> bool:
         if not self.enabled or not fnmatch.fnmatchcase(event.type, self.when):
             return False
-        return all(str(event.data.get(k)) == str(v) for k, v in self.match.items() if v not in ("", None, "*"))
+        return all(_match_value(event.data.get(k), v) for k, v in self.match.items() if v not in ("", None, "*"))
 
     @classmethod
     def from_dict(cls, d: dict) -> Rule:
@@ -107,6 +107,22 @@ class Rule:
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "enabled": self.enabled, "when": self.when,
                 "match": dict(self.match), "actions": [a.to_dict() for a in self.actions]}
+
+
+_COMPARE = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b, "<": lambda a, b: a < b}
+
+
+def _match_value(actual, wanted) -> bool:
+    """A filter value is an exact text match, or a numeric threshold when it starts
+    with >=, <=, > or < ("five_hour_used" is ">= 90")."""
+    text = str(wanted).strip()
+    for op in (">=", "<=", ">", "<"):
+        if text.startswith(op):
+            try:
+                return _COMPARE[op](float(actual), float(text[len(op):].strip()))
+            except (TypeError, ValueError):
+                return False
+    return str(actual) == text
 
 
 def _color(value) -> tuple:

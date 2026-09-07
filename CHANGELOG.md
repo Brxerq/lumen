@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- **The status tab acts, moves and breathes.** Click a session row and that
+  tab's terminal or IDE comes to the front (Windows, macOS with System
+  Events, Linux with `xdotool`). Settings picks where it sits — top centre,
+  top left or right, or the bottom edge, which keeps it clear of a MacBook's
+  notch — and whether it hides while a game, film or presentation runs full
+  screen. The panel unfolds instead of popping, and a tab that just started
+  waiting on you pulses its bar for a moment.
+- **What each tab is doing, and what it cost.** Hooks record the current tool
+  ("Editing api.py", "Running: pytest -q", "Asking you") and the transcript's
+  token totals per session; the panel shows the activity next to the tab's
+  name and the session's cost in dollars beside its context use. Both ride in
+  the `agents.sessions` event for the dashboard and other devices.
+- **Codex usage limits** the same way as Claude's: read from `~/.codex/auth.json`
+  (never refreshed), polled every five minutes, shown on the Codex card and
+  emitted as `codex.usage`.
+- **Rules on usage.** `claude.usage` and `codex.usage` are in the rule builder
+  with threshold filters ("five_hour_used is >= 90"); any filter value that
+  starts with `>=`, `<=`, `>` or `<` compares as a number. Both cards on the
+  Integrations page show the two limits as meters, with a burn-rate line
+  ("at this pace, full in 1h 40m") once a few samples are in.
+- **Log viewer.** Settings → Advanced → Log shows the tail of `lumen.log`
+  in the dashboard, so a Mac problem can be read without hunting for a file.
+- **`lumen selfcheck`** imports every adapter and integration and draws the
+  status tab off-screen. CI runs it on all three platforms, and the release
+  workflow runs it against the frozen binary before uploading, so a missing
+  hidden import fails the release instead of a user's first launch.
+- **Signing hooks in the release workflow**, active when the certificate
+  secrets exist, plus a Homebrew formula and winget manifest set under
+  `docs/packaging/` ready to publish once releases are signed.
+
+### Changed
+- Pyright now covers the whole package (devices and integrations included) and
+  reports nothing.
+
 ## [0.5.0] — 2026-09-07
 
 ### Changed

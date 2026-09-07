@@ -186,7 +186,8 @@ def test_agent_integration_emits_transitions(monkeypatch):
     assert [[s["status"] for s in e.data["sessions"]] for e in per_tab] == [[], [RUNNING], [INPUT], [DONE]]
     assert [e.data["status"] for e in per_tab] == [DONE, RUNNING, INPUT, DONE]
     assert per_tab[1].data["sessions"] == [{"id": "s1", "agent": "claude", "slot": 0, "label": "", "status": RUNNING,
-                                            "started": None, "ts": None, "cwd": "", "context": None}]
+                                            "started": None, "ts": None, "cwd": "", "context": None,
+                                            "activity": "", "tokens": None, "model": "", "cost_usd": 0.0}]
     types = [(e.type, e.data.get("status")) for e in events if e.type != "agents.sessions"]
     # first poll settles the aggregate without a per-agent flash; then each change emits both
     assert types == [("agents.status", "done"),
@@ -243,8 +244,93 @@ def test_context_window_comes_from_the_transcripts_last_usage(tmp_path):
     ev = {"hook_event_name": "UserPromptSubmit", "session_id": "ctx1", "transcript_path": str(t)}
     ag.apply_hook(ev, tmp_path, now=1.0)
     rec = json.loads((tmp_path / "ctx1.json").read_text())
-    assert rec["context"] == {"tokens": 400_000, "window": 1_000_000}
+    # cumulative session totals ride along with the context window
+    assert rec["context"] == {"tokens": 400_000, "window": 1_000_000, "input_tokens": 400_000, "output_tokens": 0}
     a = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 41, "window": 100}}])
     b = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 44, "window": 100}}])
     c = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 46, "window": 100}}])
     assert a == b != c
+
+
+def test_activity_is_a_short_phrase_and_survives_hooks_that_carry_no_tool(tmp_path):
+    act = lambda **p: ag.activity_of(p)
+    assert act(tool_name="Edit", tool_input={"file_path": r"C:\proj\src\api.py"}) == "Editing api.py"
+    assert act(tool_name="Write", tool_input={"file_path": "/x/app.js"}) == "Editing app.js"
+    assert act(tool_name="Read", tool_input={"file_path": "/x/api.py"}) == "Reading api.py"
+    assert act(tool_name="Bash", tool_input={"command": "pytest -q " + "x" * 60}) == "Running: pytest -q " + "x" * 30
+    assert act(tool_name="Grep", tool_input={"pattern": "x"}) == "Searching"
+    assert act(tool_name="Task", tool_input={}) == "Delegating"
+    assert act(tool_name="AskUserQuestion") == "Asking you"
+    assert act(tool_name="WebFetch") == "Using WebFetch"
+    assert act(tool_name="Read", tool_input="not a dict") == "Reading"
+    assert act(hook_event_name="UserPromptSubmit") == "Thinking"
+    assert act(hook_event_name="Stop") == ""
+    assert ag.activity_of({"hook_event_name": "Notification"}, "Editing api.py") == "Editing api.py"
+
+    ev = {"session_id": "act1", "hook_event_name": "UserPromptSubmit"}
+    ag.apply_hook(ev, tmp_path, now=1.0)
+    read = lambda: json.loads((tmp_path / "act1.json").read_text())["activity"]
+    assert read() == "Thinking"
+    ag.apply_hook({**ev, "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                   "tool_input": {"command": "ruff check"}}, tmp_path, now=2.0)
+    assert read() == "Running: ruff check"
+    ag.apply_hook({**ev, "hook_event_name": "PermissionRequest"}, tmp_path, now=3.0)
+    assert read() == "Running: ruff check"          # a prompt interrupts the activity, it doesn't replace it
+    ag.apply_hook({**ev, "hook_event_name": "Stop"}, tmp_path, now=4.0)
+    assert read() == ""
+
+
+def test_session_tokens_accumulate_over_the_whole_transcript(tmp_path):
+    t = tmp_path / "t.jsonl"
+    turn = lambda out, model="claude-opus-5": json.dumps(
+        {"type": "assistant", "message": {"model": model, "usage": {
+            "input_tokens": 10, "output_tokens": out, "cache_creation_input_tokens": 100,
+            "cache_read_input_tokens": 1000}}})
+    t.write_text(turn(1) + "\n" + turn(2) + "\n")
+    ev = {"hook_event_name": "PostToolUse", "session_id": "cost1", "transcript_path": str(t)}
+    ag.apply_hook(ev, tmp_path, now=1.0)
+    rec = json.loads((tmp_path / "cost1.json").read_text())
+    assert rec["tokens"] == {"in": 20, "out": 3, "cache_write": 200, "cache_read": 2000}
+    assert rec["model"] == "claude-opus-5" and rec["transcript_offset"] == t.stat().st_size
+    assert rec["context"]["input_tokens"] == 20 and rec["context"]["output_tokens"] == 3
+
+    # only the appended bytes are re-read, and a partial trailing line waits for next time
+    with t.open("a") as f:
+        f.write(turn(5) + "\n" + turn(9)[:-4])
+    ag.apply_hook(ev, tmp_path, now=2.0)
+    rec = json.loads((tmp_path / "cost1.json").read_text())
+    assert rec["tokens"] == {"in": 30, "out": 8, "cache_write": 300, "cache_read": 3000}
+    with t.open("a") as f:
+        f.write(turn(9)[-4:] + "\n")
+    ag.apply_hook(ev, tmp_path, now=3.0)
+    assert json.loads((tmp_path / "cost1.json").read_text())["tokens"]["out"] == 17
+    # a truncated/replaced transcript starts the count over rather than freezing
+    t.write_text(turn(4) + "\n")
+    ag.apply_hook(ev, tmp_path, now=4.0)
+    assert json.loads((tmp_path / "cost1.json").read_text())["tokens"] == {
+        "in": 10, "out": 4, "cache_write": 100, "cache_read": 1000}
+
+
+def test_session_cost_uses_the_models_price():
+    tokens = {"in": 1_000_000, "out": 1_000_000, "cache_write": 1_000_000, "cache_read": 1_000_000}
+    assert ag.session_cost_usd({"tokens": tokens, "model": "claude-opus-5[1m]"}) == 15 + 75 + 18.75 + 1.5
+    assert ag.session_cost_usd({"tokens": tokens, "model": "claude-fable-5-1"}) == 15 + 75 + 18.75 + 1.5
+    assert ag.session_cost_usd({"tokens": tokens, "model": "claude-sonnet-4-5"}) == 3 + 15 + 3.75 + 0.3
+    assert ag.session_cost_usd({"tokens": tokens, "model": "claude-haiku-4-5"}) == 1 + 5 + 1.25 + 0.1
+    assert ag.session_cost_usd({"tokens": tokens, "model": "who-knows"}) == 15 + 75 + 18.75 + 1.5  # priced high
+    assert ag.session_cost_usd({}) == 0.0 and ag.session_cost_usd({"tokens": {"in": "x"}}) == 0.0
+
+
+def test_snapshot_carries_activity_and_cost_and_the_key_steps_by_the_dollar():
+    ag._sessions.clear()
+    rec = {"started": 1, "ts": 2, "activity": "Reading api.py", "model": "claude-opus-5",
+           "tokens": {"out": 100_000}}                                  # 100k output tokens = $7.50
+    snap = ag._update_sessions("claude", {"a": RUNNING}, {"a": rec})
+    assert snap[0]["activity"] == "Reading api.py" and snap[0]["cost_usd"] == 7.5
+    assert snap[0]["model"] == "claude-opus-5" and snap[0]["tokens"] == {"out": 100_000}
+    # the activity moves -> an event; the cost creeping inside the same dollar -> none
+    assert ag._update_sessions("claude", {"a": RUNNING}, {"a": {**rec, "activity": "Editing api.py"}})
+    assert ag._update_sessions("claude", {"a": RUNNING}, {"a": {**rec, "activity": "Editing api.py",
+                                                               "tokens": {"out": 101_000}}}) is None
+    assert ag._update_sessions("claude", {"a": RUNNING}, {"a": {**rec, "activity": "Editing api.py",
+                                                               "tokens": {"out": 120_000}}})  # $9 -> a step

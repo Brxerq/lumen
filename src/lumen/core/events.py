@@ -34,6 +34,11 @@ CATALOG: dict[str, dict] = {
     "agent.finished":    {"label": "AI agent finished its task",  "fields": {"agent": ["claude", "codex"]}},
     "agents.status":     {"label": "Overall agent status changed", "fields": {"status": ["running", "input", "done"]}},
     "agents.sessions":   {"label": "Any agent session changed (per-tab)", "fields": {"status": ["running", "input", "done"]}},
+    # usage limits: the fields are numbers, so the filter is a threshold (">= 90"), see rules._match_value
+    "claude.usage":      {"label": "Claude usage limits changed", "fields": {"five_hour_used": [">= 50", ">= 70", ">= 90"],
+                                                                             "seven_day_used": [">= 50", ">= 70", ">= 90"]}},
+    "codex.usage":       {"label": "Codex usage limits changed", "fields": {"five_hour_used": [">= 50", ">= 70", ">= 90"],
+                                                                            "seven_day_used": [">= 50", ">= 70", ">= 90"]}},
     "command.succeeded": {"label": "Command finished (exit 0)",   "fields": {"name": []}},
     "command.failed":    {"label": "Command failed (exit != 0)",  "fields": {"name": []}},
     "build.succeeded":   {"label": "Build succeeded",             "fields": {"name": []}},

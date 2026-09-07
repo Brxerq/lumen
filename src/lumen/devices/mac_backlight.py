@@ -14,6 +14,7 @@ shows regardless.
 from __future__ import annotations
 
 import sys
+from typing import cast
 
 from lumen.core.devices import BRIGHTNESS, Device
 
@@ -59,8 +60,9 @@ class KeyboardBacklight(Device):
         except Exception:
             return None
 
-    def restore(self, saved) -> None:
-        self.set_brightness(float(saved))
+    def restore(self, saved: object) -> None:
+        if saved is not None:
+            self.set_brightness(float(cast(float, saved)))
 
 
 def discover() -> list[Device]:

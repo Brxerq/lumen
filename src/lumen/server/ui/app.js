@@ -581,6 +581,7 @@ function renderIntegrations(st) {
     <div>
       <div class="row-title"><span class="dot ${i.connected ? "on" : ""}"></span>${h(i.name)}<small>${h(i.detail || "")}</small></div>
       <div class="row-sub mt" style="margin-top:6px">${h(i.description)}</div>
+      ${usageMeters(i.usage)}
       <div class="chips mt">${i.events.map(e => `<span class="chip ev">${h(e)}</span>`).join("")}</div>
       ${i.docs ? `<div class="integ-doc">${md(i.docs)}</div>` : ""}
       ${Object.keys(i.option_fields || {}).length ? `<div class="integ-opts">${Object.entries(i.option_fields).map(([k, f]) => `<div class="field"><label>${h(f.label)}</label><input class="input" type="${f.type || "text"}" placeholder="${h(f.placeholder || "")}" value="${h(i.options?.[k] ?? "")}" id="opt-${i.id}-${k}" style="min-width:${f.type === "number" ? 90 : 320}px"></div>`).join("")}
@@ -589,6 +590,17 @@ function renderIntegrations(st) {
     </div>
     <div class="row-actions">${i.can_connect ? (i.connected ? `<button class="btn sm" onclick="L.connect('${js(i.id)}', true)">Disconnect</button>` : `<button class="btn sm primary" onclick="L.connect('${js(i.id)}')">Connect</button>`) : ""}</div>
   </div>`).join("")}</div></div>`;
+}
+// The 5-hour and 7-day limits an agent integration read with its own login,
+// as two thin meters. Grey until it matters, amber past 70 %, red past 90 %.
+function usageMeters(u) {
+  if (!u || (!u.five_hour && !u.seven_day)) return "";
+  const tone = p => p >= 90 ? "var(--red)" : p >= 70 ? "var(--amber)" : "var(--dim)";
+  const left = ts => { if (!ts) return ""; const s = Math.max(0, ts - Date.now() / 1000), d = Math.floor(s / 86400), hh = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${hh}h` : hh ? `${hh}h ${String(m).padStart(2, "0")}m` : `${m}m`; };
+  const eta = u.eta_full_s ? ` · at this pace, full in ${left(Date.now() / 1000 + u.eta_full_s)}` : "";
+  return `<div class="meters">${[["five_hour", "Session · 5 hours", eta], ["seven_day", "Week · 7 days", ""]].filter(([k]) => u[k]).map(([k, name, extra]) => `
+    <div class="meter-row"><div class="meter-head"><span>${name}</span><span>${u[k].used}%${u[k].resets_at ? ` · resets in ${left(u[k].resets_at)}` : ""}${h(extra)}</span></div>
+    <div class="meter"><div class="meter-fill" style="width:${Math.max(2, Math.min(100, u[k].used))}%;background:${tone(u[k].used)}"></div></div></div>`).join("")}</div>`;
 }
 function md(text) {
   // minimal markdown: fenced code, inline code, links, paragraphs
@@ -658,7 +670,9 @@ function renderSettings(st) {
   </div></div></div>
 
   <div class="section"><div class="section-head"><h2>Devices &amp; engine</h2></div><div class="card"><div class="rows">
-    ${row("Status tab at the top of the screen", "A small dark tab under the top edge: one lit bar per open agent tab, hover it for details and context-window use.", tog("notch"))}
+    ${row("Status tab on the screen edge", "A small dark tab: one lit bar per open agent tab, your Claude limits, hover for details, click a row to jump to that terminal.", tog("notch"))}
+    ${s.notch ? row("Where it sits", "Bottom keeps it clear of a MacBook's notch and menu bar.", `<select class="input" aria-label="Status tab position" onchange="L.setting('notch_position', this.value)">${[["top", "Top centre"], ["top-left", "Top left"], ["top-right", "Top right"], ["bottom", "Bottom centre"]].map(([v, name]) => `<option value="${v}" ${s.notch_position === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
+    ${s.notch ? row("Hide during full-screen apps", "Games, films and presentations keep the whole screen.", tog("notch_hide_fullscreen")) : ""}
     ${row("Start OpenRGB automatically", "Launches the OpenRGB server when it is installed but not running.", tog("launch_openrgb"))}
     ${row("Look for new devices every", "Seconds between background scans. Set to 0 to scan only when you press the button.", `<input type="number" class="input num" min="0" value="${s.rescan_interval_s}" onchange="L.setting('rescan_interval_s', +this.value)">`)}
     ${row(st.paused ? "Lumen is paused" : "Lumen is running", st.paused ? "Your devices are back under their own control." : "Automations are reacting to events.", `<button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>`)}
@@ -667,6 +681,8 @@ function renderSettings(st) {
   <div class="section"><div class="section-head"><h2>Advanced</h2></div><div class="card"><div class="rows">
     ${row("Write events to the log file", "Records each event and the automations it triggered.", tog("log_events"))}
     ${row("Webhook token", "If set, anything posting to /api/events must send it as a bearer token.", `<input class="input" style="width:240px" placeholder="none" value="${h(s.webhook_token)}" onchange="L.setting('webhook_token', this.value)">`)}
+    ${row("Log", "The last lines Lumen wrote. Start here when a device or an agent misbehaves.", `<button class="btn sm" onclick="L.loadLog()">${S.log ? "Refresh" : "Show"}</button>`)}
+  </div>${S.log ? `<pre class="log" id="log-view">${h(S.log.join("\n") || "(the log is empty)")}</pre>` : ""}<div class="rows">
     ${row("Port", "Where this dashboard and the API listen on 127.0.0.1. Takes effect after a restart.", `<input type="number" class="input num" value="${s.port}" onchange="L.setting('port', +this.value)">`)}
   </div></div></div>
 
@@ -997,6 +1013,10 @@ const L = window.L = {
   draft(k, v) { if (k === "when" && v === "__custom") v = "custom.event"; S.draft[k] = v; if (k === "when") { S.draft.match = {}; openModal(ruleEditor()); } },
   palette(i, k, v) { const a = S.draft.actions[i]; a.palette = { ...DEF_PALETTE, ...(a.palette || {}), [k]: rgb(v) }; const el = $(`#pal-${i}-${k}`); if (el) el.value = v; },
   match(k, v) { S.draft.match[k] = v; },
+  async loadLog() {
+    try { S.log = (await api("GET", "/api/log")).lines; } catch (e) { S.log = [`could not read the log: ${e.message || e}`]; }
+    render(); requestAnimationFrame(() => { const el = document.getElementById("log-view"); if (el) el.scrollTop = el.scrollHeight; });
+  },
   action(i, k, v) {
     const a = S.draft.actions[i];
     if (k === "color") { const el = $(`#color-${i}`); if (el) el.value = v; v = rgb(v); }

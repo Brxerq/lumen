@@ -14,7 +14,10 @@ device sits in the daemon, so it can hand the child what the keyboard cannot
 show: which tab is which, how full its context window is, and how much of the
 5-hour and 7-day Claude limits are gone). The picture itself
 is drawn by Pillow (supersampled, so edges and text are smooth) and handed to
-Tk as a PNG. Settings → "Status tab at the top of the screen" turns it off.
+Tk as a PNG. Settings → "Status tab at the top of the screen" turns it off,
+picks its corner (top centre, top left/right, bottom centre) and whether it
+hides while a game or video runs full screen. Clicking a row brings that
+tab's terminal to the front.
 
     python -m lumen.devices.notch     # the child (source install)
     lumen notch-child                 # the child (frozen build; same code)
@@ -23,8 +26,13 @@ Tk as a PNG. Settings → "Status tab at the top of the screen" turns it off.
 from __future__ import annotations
 
 import json
+import math
 import os
+import subprocess
 import sys
+import time
+from pathlib import Path
+from typing import cast
 
 from lumen.core.devices import COLOR, RGB, ZONES
 from lumen.devices.screen import ScreenGlow
@@ -43,6 +51,21 @@ INK, MUTED = (236, 237, 241), (140, 143, 154)
 KEY = (1, 0, 1)              # Windows chroma key; on macOS the window is truly transparent
 LABELS = {"running": "working", "input": "needs you", "done": "done"}
 SS = 3                       # supersample factor for Pillow drawing
+POSITIONS = ("top", "top-left", "top-right", "bottom")
+PULSE_S = 1.6                # a tab that just started waiting on you breathes this long
+
+
+def _get_lanczos_filter() -> int:
+    """Get the Pillow resampling filter constant, handling old and new versions."""
+    try:
+        from PIL import Image
+        return Image.Resampling.LANCZOS  # type: ignore[attr-defined]
+    except AttributeError:
+        from PIL import Image
+        return Image.LANCZOS  # type: ignore[attr-defined]
+
+
+LANCZOS_FILTER = _get_lanczos_filter()
 
 
 def child_command() -> list[str]:
@@ -59,6 +82,7 @@ class Notch(ScreenGlow):
         self.zone_count = ZONE_COUNT
         self.ambient = True  # its whole purpose is the persistent sessions view
         self.details = {"connection": "built-in", "zones": ZONE_COUNT}
+        self.position, self.hide_fullscreen = "top", True
 
     def child_command(self) -> list[str]:
         return child_command()
@@ -69,7 +93,8 @@ class Notch(ScreenGlow):
     def set_zones(self, colors: list[RGB]) -> None:
         from lumen.integrations import claude_usage
         from lumen.integrations.agent_sessions import all_sessions
-        payload = {"sessions": all_sessions(), "usage": claude_usage.latest()}
+        payload = {"sessions": all_sessions(), "usage": claude_usage.latest(),
+                   "options": {"position": self.position, "hide_fullscreen": self.hide_fullscreen}}
         self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
 
@@ -90,6 +115,9 @@ def discover(settings: dict | None = None) -> list:
         return []
     if _instance is None:
         _instance = Notch()
+    position = str((settings or {}).get("notch_position") or "top")
+    _instance.position = position if position in POSITIONS else "top"
+    _instance.hide_fullscreen = bool((settings or {}).get("notch_hide_fullscreen", True))
     _instance.connected = True
     _instance.warm_up()
     return [_instance]
@@ -99,8 +127,8 @@ def discover(settings: dict | None = None) -> list:
 # Child process: pure functions first (tested), then the Tk loop
 # ---------------------------------------------------------------------------
 
-def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict], dict] | None:
-    """One stdin line: zones, the session list and the usage summary (both empty if absent)."""
+def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict], dict, dict] | None:
+    """One stdin line: zones, the session list, the usage summary and the display options (empty if absent)."""
     colours, _, extra = line.partition("|")
     zones = parse_zones(colours, n)
     if zones is None:
@@ -115,9 +143,11 @@ def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict], d
         payload = {}
     sessions = payload.get("sessions") or []
     usage = payload.get("usage") or {}
+    options = payload.get("options") or {}
     return (zones, [s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else [],
             {k: v for k, v in usage.items() if isinstance(v, dict) and isinstance(v.get("used"), (int, float))}
-            if isinstance(usage, dict) else {})
+            if isinstance(usage, dict) else {},
+            options if isinstance(options, dict) else {})
 
 
 def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:
@@ -128,7 +158,7 @@ def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:
         return None
     if len(vals) < 3:
         return None
-    zones = [tuple(vals[i:i + 3]) for i in range(0, len(vals) - len(vals) % 3, 3)]
+    zones = [cast(RGB, tuple(vals[i:i + 3])) for i in range(0, len(vals) - len(vals) % 3, 3)]
     return (zones + [zones[-1]] * n)[:n]
 
 
@@ -143,14 +173,30 @@ def runs(zones: list[RGB]) -> list[tuple[RGB, int]]:
     return [(c, w) for c, w in out if c != (0, 0, 0)]
 
 
-def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None]]:
-    """(agent, name, status, context %) per live session in zone order — the
-    daemon's snapshot, so the rows match the bars and a tab's label is its name."""
+def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None, str, float | None]]:
+    """(agent, name, status, context %, activity, cost) per live session in zone
+    order — the daemon's snapshot, so the rows match the bars and a tab's label
+    is its name. `activity` ("Editing api.py") and `cost` (USD) are optional
+    snapshot fields; "" / None when the daemon doesn't know them."""
     from lumen.integrations.agent_sessions import context_percent
     rows = sorted(sessions, key=lambda s: int(s.get("slot", 0)))
-    return [(str(s.get("agent", "agent")),
-             str(s.get("label") or os.path.basename(str(s.get("cwd") or "").rstrip("/\\")) or "~"),
-             str(s.get("status")), context_percent(s)) for s in rows]
+    out = []
+    for s in rows:
+        cost = s.get("cost_usd")
+        out.append((str(s.get("agent", "agent")),
+                    str(s.get("label") or os.path.basename(str(s.get("cwd") or "").rstrip("/\\")) or "~"),
+                    str(s.get("status")), context_percent(s), str(s.get("activity") or ""),
+                    float(cost) if isinstance(cost, (int, float)) else None))
+    return out
+
+
+def panel_row_at(y: int, n_rows: int) -> int | None:
+    """Which session row a click at image y (logical px) landed on, or None."""
+    top = HEIGHT + PANEL_PAD
+    if y < top:
+        return None
+    i = (y - top) // ROW
+    return int(i) if 0 <= i < n_rows else None
 
 
 def _font(size: int, bold: bool = False):
@@ -183,13 +229,15 @@ def usage_colour(pct: int) -> RGB:
     return (230, 70, 70) if pct >= 90 else (240, 170, 40) if pct >= 70 else (150, 154, 168)
 
 
-def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palette: dict[str, RGB],
+def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
            opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
-           unfolded: bool = False, now: float | None = None):
+           unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
     platform can't do per-pixel alpha). `unfolded` = the hover panel: session
     rows, then the usage meters. `fills` is one context-window percentage per
-    bar (None = solid bar); `usage` the 5-hour / 7-day summary, if known."""
+    bar (None = solid bar); `usage` the 5-hour / 7-day summary, if known.
+    `flip` rounds the top instead (the tab hangs up from the bottom edge);
+    `glow_gain` > 1 brightens the bar glow for the "needs you" pulse."""
     from PIL import Image, ImageDraw, ImageFilter
 
     from lumen.integrations.claude_usage import resets_in
@@ -206,9 +254,13 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # shell: flat top, rounded bottom — it hangs from the screen edge
-    d.rounded_rectangle((0, -R, W - 1, H - 1), radius=R, fill=SHELL + (255,))
-    d.rounded_rectangle((SS, -R, W - 1 - SS, H - 1 - SS), radius=R - SS, outline=EDGE, width=SS)
+    # shell: flat on the screen-edge side, rounded on the other — it hangs from the edge
+    if flip:
+        d.rounded_rectangle((0, 0, W - 1, H - 1 + R), radius=R, fill=SHELL + (255,))
+        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 + R), radius=R - SS, outline=EDGE, width=SS)
+    else:
+        d.rounded_rectangle((0, -R, W - 1, H - 1), radius=R, fill=SHELL + (255,))
+        d.rounded_rectangle((SS, -R, W - 1 - SS, H - 1 - SS), radius=R - SS, outline=EDGE, width=SS)
 
     # session bars, each lit from beneath
     bars = runs(zones)
@@ -224,7 +276,7 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
         for colour, n in bars:
             x1 = x + unit * n
             gd.rounded_rectangle((x - 2 * SS, y0 - 2 * SS, x1 + 2 * SS, y0 + (BAR_H + 2) * SS), radius=BAR_H * SS,
-                                 fill=colour + (150,))
+                                 fill=colour + (int(min(255, 150 * glow_gain)),))
             x = x1 + gap
         img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(4 * SS)))
         d = ImageDraw.Draw(img)
@@ -255,18 +307,28 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
         y = (HEIGHT + PANEL_PAD) * SS
         if not rows and not meters:
             d.text((W // 2, y + ROW * SS // 2), "No open agent tabs", font=meta_f, fill=MUTED + (255,), anchor="mm")
-        for agent, folder, status, pct in rows:
+        for row in rows:
+            agent, folder, status, pct = row[:4]
+            activity = row[4] if len(row) > 4 else ""
+            cost = row[5] if len(row) > 5 else None
             colour = tuple(palette.get(status, MUTED[:3]))
             cy = y + ROW * SS // 2
             d.ellipse((BAR_INSET * SS, cy - 4 * SS, BAR_INSET * SS + 8 * SS, cy + 4 * SS), fill=colour + (255,))
             d.text((BAR_INSET * SS + 18 * SS, cy), agent.capitalize(), font=name_f, fill=INK + (255,), anchor="lm")
             nx = d.textlength(agent.capitalize(), font=name_f)
-            d.text((BAR_INSET * SS + 18 * SS + nx + 10 * SS, cy), folder, font=meta_f, fill=MUTED + (255,), anchor="lm")
-            label = LABELS.get(status, status)
+            label = cast(str, LABELS.get(status, status))
             d.text((W - BAR_INSET * SS, cy), label, font=meta_f, fill=colour + (255,), anchor="rm")
-            if pct is not None:  # context window, e.g. "63%", left of the state
-                lx = W - BAR_INSET * SS - d.textlength(label, font=meta_f) - 12 * SS
-                d.text((lx, cy), f"{pct}%", font=meta_f, fill=MUTED + (255,), anchor="rm")
+            right = W - BAR_INSET * SS - d.textlength(label, font=meta_f) - 12 * SS
+            meta = "  ·  ".join(x for x in ((f"${cost:.2f}" if cost else ""), (f"{pct}%" if pct is not None else "")) if x)
+            if meta:  # cost and context window, e.g. "$1.20  ·  63%", left of the state
+                d.text((right, cy), meta, font=meta_f, fill=MUTED + (255,), anchor="rm")
+                right -= d.textlength(meta, font=meta_f) + 12 * SS
+            # name, then what the tab is doing right now; clipped to the room that is left
+            text = folder + (f"  ·  {activity}" if activity and status == "running" else "")
+            x0 = BAR_INSET * SS + 18 * SS + nx + 10 * SS
+            while text and d.textlength(text, font=meta_f) > right - x0:
+                text = text[:-2].rstrip() + "…" if len(text) > 2 else ""
+            d.text((x0, cy), text, font=meta_f, fill=MUTED + (255,), anchor="lm")
             y += ROW * SS
         if meters:  # the subscription limits: a label, a thin meter, the number and the reset time
             if rows:
@@ -287,12 +349,117 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
                 d.rounded_rectangle((mx0, my, mx0 + fw, my + METER_H * SS), radius=METER_H * SS // 2, fill=colour + (255,))
                 y += ROW * SS
 
-    img = img.resize((w, h), Image.LANCZOS)
+    img = img.resize((w, h), LANCZOS_FILTER)
     if opaque_key is not None:
         back = Image.new("RGBA", img.size, opaque_key + (255,))
         back.alpha_composite(img)
         img = back
     return img
+
+
+def session_pids(home: Path | None = None) -> dict[str, int]:
+    """session id -> process id, from the per-process files Claude Code keeps in ~/.claude/sessions."""
+    out: dict[str, int] = {}
+    for path in ((home or Path.home() / ".claude") / "sessions").glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data.get("pid"), int) and data.get("sessionId"):
+                out[str(data["sessionId"])] = int(data["pid"])
+        except (OSError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def _lineage(pid: int) -> list[int]:
+    """The process and its ancestors: the agent runs inside a terminal or an IDE,
+    and it is that window we want in front."""
+    try:
+        import psutil
+        proc = psutil.Process(pid)
+        return [pid] + [p.pid for p in proc.parents()]
+    except Exception:
+        return [pid]
+
+
+def focus_pid(pid: int) -> bool:
+    """Bring the window belonging to `pid` (or the nearest ancestor with one) to the front."""
+    pids = _lineage(pid)
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        found: list[tuple[int, int]] = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def each(hwnd, _):
+            if not user32.IsWindowVisible(hwnd) or not user32.GetWindowTextLengthW(hwnd):
+                return True
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value in pids:
+                found.append((pids.index(owner.value), hwnd))
+            return True
+
+        user32.EnumWindows(each, 0)
+        if not found:
+            return False
+        hwnd = min(found)[1]  # the closest ancestor's window wins
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        return bool(user32.SetForegroundWindow(hwnd))
+    if sys.platform == "darwin":
+        for p in pids:
+            script = f'tell application "System Events" to set frontmost of (first process whose unix id is {p}) to true'
+            if subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5).returncode == 0:
+                return True
+        return False
+    import shutil
+    if shutil.which("xdotool"):
+        for p in pids:
+            out = subprocess.run(["xdotool", "search", "--pid", str(p)], capture_output=True, text=True, timeout=5)
+            wid = out.stdout.split()
+            if wid and subprocess.run(["xdotool", "windowactivate", wid[-1]], timeout=5).returncode == 0:
+                return True
+    return False
+
+
+def focus_session(session: dict) -> bool:
+    """Click on a row: raise the terminal that tab lives in. Codex has no pid file we know of, so only Claude."""
+    pid = session_pids().get(str(session.get("id", "")))
+    if pid is None:
+        return False
+    try:
+        return focus_pid(pid)
+    except Exception:
+        return False
+
+
+def fullscreen_app_in_front() -> bool:
+    """A game, a film, a presentation: the tab stays out of the way while one is up."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            state = ctypes.c_int()
+            if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) == 0:
+                # QUNS_BUSY 2, QUNS_RUNNING_D3D_FULL_SCREEN 3, QUNS_PRESENTATION_MODE 4
+                return state.value in (2, 3, 4)
+        elif sys.platform == "darwin":
+            from AppKit import NSScreen
+            screen = NSScreen.mainScreen()
+            return screen.visibleFrame().size.height >= screen.frame().size.height  # menu bar gone = full screen
+    except Exception:
+        pass
+    return False
+
+
+def self_check() -> bool:
+    """One frame of each state, drawn off-screen: what CI runs instead of opening a window."""
+    from lumen.core.rules import DEFAULT_PALETTE
+    rows = [("claude", "check", "running", 42, "Editing api.py", 0.5), ("codex", "check", "input", None, "", None)]
+    usage = {"five_hour": {"used": 23, "resets_at": None}, "seven_day": {"used": 72, "resets_at": None}}
+    zones = [(240, 170, 40)] * 3 + [(230, 60, 60)] * 3
+    a = render(zones, rows, DEFAULT_PALETTE, KEY, [42, None], usage)
+    b = render(zones, rows, DEFAULT_PALETTE, None, [42, None], usage, unfolded=True, flip=True, glow_gain=1.5)
+    return a.size == (WIDTH, HEIGHT) and b.size[0] == PANEL_WIDTH and b.size[1] > HEIGHT
 
 
 def _top_inset() -> int:
@@ -318,7 +485,7 @@ def run_child() -> int:
 
     root = tk.Tk()
     root.withdraw()
-    sw = root.winfo_screenwidth()
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     win = tk.Toplevel(root)
     win.overrideredirect(True)
     win.attributes("-topmost", True)
@@ -338,37 +505,88 @@ def run_child() -> int:
     label.pack()
     top = _top_inset()
 
-    state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "usage": {}, "hover": False, "photo": None}
+    state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "usage": {}, "options": {}, "hover": False,
+             "photo": None, "pulse_until": 0.0, "waiting": set(), "fullscreen": False, "fs_checked": 0.0,
+             "reveal": 1.0}  # reveal: 0..1 of the unfolded panel shown, for the unfold animation
+
+    def position() -> str:
+        pos = str(state["options"].get("position") or "top")
+        return pos if pos in POSITIONS else "top"
 
     def show(img):
+        pos = position()
+        w, h = img.width, img.height
+        if pos == "bottom":
+            x, y = (sw - w) // 2, sh - h
+        elif pos == "top-left":
+            x, y = 24, top
+        elif pos == "top-right":
+            x, y = sw - w - 24, top
+        else:
+            x, y = (sw - w) // 2, top
+        # unfolding: crop the panel to the revealed part so it grows out of the edge
+        if state["hover"] and state["reveal"] < 1.0:
+            shown = max(HEIGHT, int(HEIGHT + (h - HEIGHT) * state["reveal"]))
+            img = img.crop((0, h - shown, w, h)) if pos == "bottom" else img.crop((0, 0, w, shown))
+            if pos == "bottom":
+                y = sh - shown
+            h = shown
         buf = io.BytesIO()
         img.save(buf, "PNG")
         photo = tk.PhotoImage(data=buf.getvalue())
         state["photo"] = photo  # keep a reference or Tk drops the picture
         label.configure(image=photo)
-        win.geometry(f"{img.width}x{img.height}+{(sw - img.width) // 2}+{top}")
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
+    def hide():
+        try:
+            win.attributes("-alpha", 0.0)
+        except tk.TclError:
+            win.withdraw()
 
     def draw():
         zones = state["zones"]
-        if all(z == (0, 0, 0) for z in zones):
-            try:
-                win.attributes("-alpha", 0.0)
-            except tk.TclError:
-                win.withdraw()
+        if all(z == (0, 0, 0) for z in zones) or state["fullscreen"]:
+            hide()
             return
         rows = session_rows(state["sessions"])
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
-        show(render(zones, rows, DEFAULT_PALETTE, key, fills, state["usage"], unfolded=state["hover"]))
+        left = state["pulse_until"] - time.time()
+        gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
+        show(render(zones, rows, DEFAULT_PALETTE, key, fills, state["usage"], unfolded=state["hover"],
+                    flip=position() == "bottom", glow_gain=gain))
         try:
             win.attributes("-alpha", ALPHA)
         except tk.TclError:
             win.deiconify()
 
+    def animate():
+        if state["hover"] and state["reveal"] < 1.0:
+            state["reveal"] = min(1.0, state["reveal"] + 0.25)
+            draw()
+            root.after(16, animate)
+
     def hover(on):
         if state["hover"] != on:
             state["hover"] = on
+            state["reveal"] = 0.0 if on else 1.0
             draw()
+            if on:
+                root.after(16, animate)
+
+    def clicked(event):
+        rows = session_rows(state["sessions"])
+        if not state["hover"] or not rows:
+            return
+        y = event.y if position() != "bottom" else event.y  # the image is not mirrored, only anchored
+        i = panel_row_at(int(y), len(rows))
+        if i is None:
+            return
+        ordered = sorted(state["sessions"], key=lambda s: int(s.get("slot", 0)))
+        threading.Thread(target=focus_session, args=(ordered[i],), daemon=True).start()
+
+    label.bind("<Button-1>", clicked)
 
     def pointer_inside() -> bool:
         px, py = win.winfo_pointerxy()
@@ -400,10 +618,25 @@ def run_child() -> int:
                 root.destroy()
                 return
             last = item
-        if last and (parsed := parse_line(last)) is not None and list(parsed) != [state["zones"], state["sessions"], state["usage"]]:
-            state["zones"], state["sessions"], state["usage"] = parsed
+        if last and (parsed := parse_line(last)) is not None and list(parsed) != [state["zones"], state["sessions"],
+                                                                                    state["usage"], state["options"]]:
+            state["zones"], state["sessions"], state["usage"], state["options"] = parsed
+            # a tab that just started waiting on you: breathe for a moment so the eye catches it
+            waiting = {s.get("id") for s in state["sessions"] if s.get("status") == "input"}
+            if waiting - state["waiting"]:
+                state["pulse_until"] = time.time() + PULSE_S
+            state["waiting"] = waiting
             draw()
-        root.after(16, poll)
+        elif state["pulse_until"] > time.time():
+            draw()
+        now = time.time()
+        if now - state["fs_checked"] > 1.0:  # once a second: is a game or a film in front?
+            state["fs_checked"] = now
+            fs = bool(state["options"].get("hide_fullscreen", True)) and fullscreen_app_in_front()
+            if fs != state["fullscreen"]:
+                state["fullscreen"] = fs
+                draw()
+        root.after(16 if state["pulse_until"] > now else 33, poll)
 
     draw()
     root.after(16, poll)

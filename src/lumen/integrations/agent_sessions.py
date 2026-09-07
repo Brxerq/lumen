@@ -39,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from lumen import paths
 from lumen.core import slots
@@ -114,27 +115,137 @@ def apply_hook(payload: dict, state_dir: Path | None = None, now: float | None =
         return None  # a tab that never sent a prompt takes no slot (helper/one-shot sessions never do)
     state_dir.mkdir(parents=True, exist_ok=True)
     now = now or time.time()
-    record = {"status": status, "ts": now, "agent": agent_of(payload), "started": now}
-    try:  # keep the first-seen time so sessions keep their keyboard slot order
-        record["started"] = json.loads(path.read_text()).get("started") or now
-    except (OSError, ValueError, AttributeError):
-        pass
+    try:  # keep what the previous hook learned: slot order, running token totals
+        previous = json.loads(path.read_text())
+        previous = previous if isinstance(previous, dict) else {}
+    except (OSError, ValueError):
+        previous = {}
+    record = {"status": status, "ts": now, "agent": agent_of(payload),
+              "started": previous.get("started") or now}
+    for key in ("tokens", "model", "transcript_offset"):
+        if key in previous:
+            record[key] = previous[key]
+    record["activity"] = activity_of(payload, previous.get("activity", ""))
     if payload.get("cwd"):
         record["cwd"] = str(payload["cwd"])
     if payload.get("transcript_path"):
-        record["context"] = context_usage(Path(str(payload["transcript_path"])))
+        record["context"] = context_usage(Path(str(payload["transcript_path"])), record)
     path.write_text(json.dumps(record))
     return status
+
+
+# tool_name -> how to say what the agent is doing, in the two or three words a
+# dashboard row (or a zone tooltip) has space for.
+def activity_of(payload: dict, previous: str = "") -> str:
+    """A short human phrase for what this hook call means.
+
+    Hooks that carry no tool information (Notification, PermissionRequest,
+    SessionStart) keep whatever the last one said: they interrupt an activity,
+    they don't replace it. Only Stop clears it — the turn is over."""
+    tool = str(payload.get("tool_name") or "")
+    if tool:
+        args = payload.get("tool_input")
+        args = args if isinstance(args, dict) else {}
+        name = Path(str(args.get("file_path") or "")).name
+        if tool in ("Edit", "Write", "NotebookEdit", "MultiEdit"):
+            return f"Editing {name}" if name else "Editing"
+        if tool == "Read":
+            return f"Reading {name}" if name else "Reading"
+        if tool == "Bash":
+            command = " ".join(str(args.get("command") or "").split())
+            return f"Running: {command[:40]}" if command else "Running a command"
+        if tool in ("Grep", "Glob", "WebSearch"):
+            return "Searching"
+        if tool in ("Agent", "Task"):
+            return "Delegating"
+        if tool == "AskUserQuestion":
+            return "Asking you"
+        return f"Using {tool}"
+    event = payload.get("hook_event_name")
+    if event == "UserPromptSubmit":
+        return "Thinking"
+    if event == "Stop":
+        return ""
+    return previous
 
 
 CONTEXT_WINDOW = 200_000
 _USAGE_TAIL = 256 * 1024
 
+# $ per million tokens: (input, output, cache write, cache read). Matched by
+# substring against the model name the transcript records; an unknown model is
+# priced as the most expensive one so a surprise never reads as cheap.
+PRICES = {
+    "haiku": (1.0, 5.0, 1.25, 0.1),
+    "sonnet": (3.0, 15.0, 3.75, 0.3),
+    "opus": (15.0, 75.0, 18.75, 1.5),
+    "fable": (15.0, 75.0, 18.75, 1.5),
+}
+DEFAULT_PRICE = PRICES["opus"]
 
-def context_usage(transcript: Path) -> dict | None:
+
+def session_cost_usd(record: dict) -> float:
+    """What this session has spent at list prices, from its running token totals."""
+    tokens = record.get("tokens") or {}
+    model = str(record.get("model") or "").lower()
+    price = next((p for name, p in PRICES.items() if name in model), DEFAULT_PRICE)
+    try:
+        return sum(float(tokens.get(k, 0)) * rate
+                   for k, rate in zip(("in", "out", "cache_write", "cache_read"), price)) / 1e6
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _accumulate_tokens(transcript: Path, record: dict) -> None:
+    """Add the tokens billed since the last hook into record["tokens"].
+
+    The whole transcript would be the honest way to total a session, but it can
+    be tens of megabytes and this runs on every tool call, so each hook reads
+    only the bytes appended since the last one and remembers where it stopped
+    ("transcript_offset"). Partial trailing lines are left for next time."""
+    offset = record.get("transcript_offset")
+    offset = offset if isinstance(offset, int) and offset >= 0 else 0
+    totals = dict(record.get("tokens") or {})
+    try:
+        with transcript.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            if size < offset:  # truncated or a different session reusing the path
+                offset, totals = 0, {}
+            f.seek(offset)
+            chunk = f.read(size - offset)
+    except OSError:
+        return
+    end = chunk.rfind(b"\n") + 1
+    for raw in chunk[:end].splitlines():
+        if b'"usage"' not in raw:
+            continue
+        try:
+            message = json.loads(raw).get("message") or {}
+            usage = message.get("usage") or {}
+            counts = {"in": int(usage.get("input_tokens", 0)), "out": int(usage.get("output_tokens", 0)),
+                      "cache_write": int(usage.get("cache_creation_input_tokens", 0)),
+                      "cache_read": int(usage.get("cache_read_input_tokens", 0))}
+        except (ValueError, AttributeError, TypeError):
+            continue
+        for key, value in counts.items():
+            totals[key] = int(totals.get(key, 0)) + value
+        if message.get("model"):
+            record["model"] = str(message["model"])
+    record["tokens"] = totals
+    record["transcript_offset"] = offset + end
+
+
+def context_usage(transcript: Path, record: dict | None = None) -> dict | None:
     """How full the session's context window is, from the last assistant turn
     in a Claude Code transcript: {"tokens": n, "window": size}. None if the
-    transcript has no usage yet (or isn't Claude's)."""
+    transcript has no usage yet (or isn't Claude's).
+
+    With a `record`, it also folds the newly appended turns into that record's
+    running totals and reports them as "input_tokens" / "output_tokens" —
+    cumulative over the whole session, not the last turn."""
+    if record is not None:
+        _accumulate_tokens(transcript, record)
     try:
         with transcript.open("rb") as f:
             f.seek(max(0, transcript.stat().st_size - _USAGE_TAIL))
@@ -153,7 +264,12 @@ def context_usage(transcript: Path) -> dict | None:
         if tokens <= 0:
             continue
         window = 1_000_000 if "[1m]" in str(message.get("model", "")) else CONTEXT_WINDOW
-        return {"tokens": tokens, "window": window}
+        out = {"tokens": tokens, "window": window}
+        if record is not None:
+            totals = record.get("tokens") or {}
+            out["input_tokens"] = int(totals.get("in", 0))
+            out["output_tokens"] = int(totals.get("out", 0))
+        return out
     return None
 
 
@@ -199,7 +315,7 @@ def install_hooks(settings_path: Path, hooks: dict[str, str | None], command: st
         entry = {"type": "command", "command": command, "timeout": 5}
         if async_:
             entry["async"] = True
-        group = {"hooks": [entry]}
+        group: dict[str, Any] = {"hooks": [entry]}
         if matcher:
             group["matcher"] = matcher
         data["hooks"].setdefault(event, []).append(group)
@@ -393,7 +509,9 @@ def _update_sessions(agent: str, statuses: dict[str, str], records: dict[str, di
                 continue
             r = records.get(sid, {})
             _sessions[sid].update(status=status, started=r.get("started"), ts=r.get("ts"), cwd=r.get("cwd", ""),
-                                  context=r.get("context"))
+                                  context=r.get("context"), activity=r.get("activity", ""),
+                                  tokens=r.get("tokens"), model=r.get("model", ""),
+                                  cost_usd=round(session_cost_usd(r), 2))
         before = _key(_snapshot)
         snapshot = _rebuild()
         return snapshot if _key(snapshot) != before else None
@@ -401,8 +519,11 @@ def _update_sessions(agent: str, statuses: dict[str, str], records: dict[str, di
 
 def _key(snapshot: list[dict]) -> list[tuple]:
     """What counts as a change worth an event — timestamps alone do not, a
-    context window that moved by another five percent does."""
-    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", ""), (context_percent(s) or 0) // 5)
+    context window that moved by another five percent does. Cost is bucketed to
+    whole dollars: it creeps up on every tool call, and a repaint per cent
+    would be an event storm for a number nobody watches that closely."""
+    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", ""), (context_percent(s) or 0) // 5,
+             s.get("activity", ""), int(s.get("cost_usd") or 0))
             for s in snapshot]
 
 

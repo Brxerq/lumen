@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import sys
 import threading
+from typing import cast
 
-from lumen.core.devices import COLOR, ZONES, Device
+from lumen.core.devices import COLOR, RGB, ZONES, Device
 
 VID = 0x0B05
 USAGE_PAGE, USAGE = 0xFF31, 0x79
@@ -105,13 +106,13 @@ class AuraSurface(Device):
         )
         self._c, self._surface = controller, surface
 
-    def set_zones(self, colors) -> None:
-        colors = [tuple(c) for c in colors][: self.zone_count]
-        setattr(self._c, self._surface, colors)
+    def set_zones(self, colors: list[RGB]) -> None:
+        colors_out: list[RGB] = cast(list[RGB], [tuple(c) for c in colors][: self.zone_count])
+        setattr(self._c, self._surface, colors_out)
         self._c.flush()
 
-    def set_color(self, rgb) -> None:
-        self.set_zones([tuple(rgb)] * self.zone_count)
+    def set_color(self, rgb: RGB) -> None:
+        self.set_zones([cast(RGB, tuple(rgb))] * self.zone_count)
 
     def close(self) -> None:
         self._c.close()
@@ -171,7 +172,7 @@ def discover() -> list[Device]:
             if (rival := vendor_software()):
                 for surface in surfaces:
                     surface.details["hint"] = f"{rival} is running and repaints this device; close it if colours flicker."
-            _cache[d["path"]] = surfaces
+            _cache[d["path"]] = cast(list[Device], surfaces)
             return list(surfaces)
     _cache.clear()  # unplugged/undetected: next detection gets a fresh handle
     return []

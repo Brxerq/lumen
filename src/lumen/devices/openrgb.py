@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from lumen.core.devices import COLOR, ZONES, Device
 
@@ -62,7 +63,7 @@ def launch_server(timeout: float = 15.0) -> bool:
     cmd = executable()
     if not cmd:
         return False
-    flags = {"creationflags": 0x00000008} if sys.platform == "win32" else {}  # DETACHED_PROCESS
+    flags: dict[str, Any] = {"creationflags": 0x00000008} if sys.platform == "win32" else {}  # DETACHED_PROCESS
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

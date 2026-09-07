@@ -1,0 +1,20 @@
+PackageIdentifier: Brxerq.Lumen
+PackageVersion: 0.5.0
+PackageLocale: en-US
+Publisher: Brxerq
+PublisherUrl: https://github.com/Brxerq
+PackageName: Lumen
+PackageUrl: https://github.com/Brxerq/lumen
+License: MIT
+LicenseUrl: https://github.com/Brxerq/lumen/blob/main/LICENSE
+ShortDescription: Something happens on your computer, the devices around you react.
+Description: Universal device feedback for developers. Your AI coding agent finishes, a build fails, a deploy lands, and your keyboard, light bar, smart lights or screen edge react. Local, private, no cloud.
+Tags:
+  - rgb
+  - keyboard
+  - notifications
+  - claude
+  - codex
+  - developer-tools
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

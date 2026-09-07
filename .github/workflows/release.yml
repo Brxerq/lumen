@@ -32,6 +32,48 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: pyinstaller build/lumen.spec --distpath dist --workpath build/pyi -y
+      # Run the binary we are about to ship. A hidden import PyInstaller missed
+      # (pyobjc on a Mac, say) fails here instead of silently on a user's machine.
+      # The Windows build is windowed, so only its exit code speaks.
+      - name: Smoke-test the frozen binary
+        shell: bash
+        run: |
+          chmod +x "${{ matrix.built }}" 2>/dev/null || true
+          "${{ matrix.built }}" selfcheck
+          "${{ matrix.built }}" scan
+        env:
+          LUMEN_HOME: ${{ runner.temp }}/lumen-home
+      - name: Sign the binary (only when signing secrets are configured)
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          # See docs/packaging/SIGNING.md. Without secrets this step is a no-op,
+          # so forks and unsigned releases keep working.
+          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$MACOS_CERT_P12" ]; then
+            echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+            security create-keychain -p tmp build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p tmp build.keychain
+            security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k tmp build.keychain
+            codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "${{ matrix.built }}"
+            ditto -c -k --keepParent "${{ matrix.built }}" notarize.zip
+            xcrun notarytool submit notarize.zip --apple-id "$MACOS_NOTARY_APPLE_ID" --password "$MACOS_NOTARY_PASSWORD" --team-id "$MACOS_NOTARY_TEAM_ID" --wait
+          elif [ "$RUNNER_OS" = "Windows" ] && [ -n "$WINDOWS_CERT_PFX" ]; then
+            echo "$WINDOWS_CERT_PFX" | base64 --decode > cert.pfx
+            SIGNTOOL=$(ls "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64/signtool.exe | tail -1)
+            "$SIGNTOOL" sign /f cert.pfx /p "$WINDOWS_CERT_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "${{ matrix.built }}"
+          else
+            echo "no signing secrets for $RUNNER_OS; shipping unsigned"
+          fi
       - name: Name the binary after the platform and record its checksum
         shell: bash
         run: |

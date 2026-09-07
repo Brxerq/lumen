@@ -112,7 +112,8 @@ class ClaudeCode(AgentIntegration):
                 print(f"claude: usage poll failed: {type(e).__name__}: {e}", flush=True)
             if usage is not None and usage != last:
                 last = usage
-                self.emit(Event("claude.usage", self.agent, {"agent": self.agent, **usage}))
+                self.emit(Event("claude.usage", self.agent,
+                                {"agent": self.agent, **usage, **claude_usage.flat(usage)}))
             self._stop.wait(claude_usage.POLL_S)
 
     def status(self) -> dict:

@@ -49,6 +49,16 @@ def test_rule_matching():
     assert not r.matches(Event("agent.finished", data={"agent": "codex"}))
     assert not r.matches(Event("agent.running", data={"agent": "claude"}))
     assert Rule(when="build.*").matches(Event("build.failed"))
+    # numeric thresholds, for the usage-limit events
+    high = Rule(when="claude.usage", match={"five_hour_used": ">= 90"})
+    assert high.matches(Event("claude.usage", data={"five_hour_used": 90}))
+    assert high.matches(Event("claude.usage", data={"five_hour_used": "95"}))
+    assert not high.matches(Event("claude.usage", data={"five_hour_used": 89}))
+    assert not high.matches(Event("claude.usage", data={}))                       # unknown never trips a threshold
+    assert Rule(when="x", match={"n": "< 5"}).matches(Event("x", data={"n": 4}))
+    assert Rule(when="x", match={"n": ">3"}).matches(Event("x", data={"n": 4}))
+    assert not Rule(when="x", match={"n": "<= 3"}).matches(Event("x", data={"n": 4}))
+    assert Rule(when="x", match={"name": ">weird"}).matches(Event("x", data={"name": ">weird"})) is False  # not a number: no match
     assert not Rule(when="build.*", enabled=False).matches(Event("build.failed"))
     assert Rule(when="x", match={"k": ""}).matches(Event("x"))  # empty filter = any
 

@@ -77,6 +77,21 @@ def _origin_is_local(header: str | None, port: int) -> bool:
     return (parsed.hostname or "").lower() in ("127.0.0.1", "localhost", "::1")
 
 
+
+def log_tail(max_lines: int = 300, max_bytes: int = 256 * 1024) -> list[str]:
+    """The end of lumen.log, for the Settings page. A windowed build has no
+    console, so this is the only place its print() output can be read without
+    hunting for the file — and the first thing to look at when a Mac misbehaves."""
+    from lumen import paths
+    path = paths.log_file()
+    try:
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - max_bytes))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    return text.splitlines()[-max_lines:]
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     # On Windows SO_REUSEADDR lets a second process bind a port that is already
@@ -203,6 +218,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(502, {"error": "update check failed"})
         if path == "/api/presets":
             return self._json(200, self.engine.config.presets)
+        if path == "/api/log":
+            return self._json(200, {"lines": log_tail()})
         if path == "/api/stream":
             return self._stream()
         if path.startswith("/api/"):
@@ -318,7 +335,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json(200, e.set_integration_options(integ_id, body))
                 case ("POST", "api", "update"):
                     from lumen.app import update
-                    return self._json(200, {"message": update.apply(self.engine.request_exit)})
+                    return self._json(200, {"message": update.apply(self.engine.request_exit, e.config.settings.get("port", 6733))})
                 case ("POST", "api", "onboarded"):
                     e.config.set_onboarded(True)
                     return self._json(200, {"onboarded": True})

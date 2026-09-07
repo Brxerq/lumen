@@ -54,3 +54,28 @@ def test_reset_countdown_reads_like_a_person_would_say_it():
     assert cu.resets_in(100 + 2 * 3600 + 5 * 60, now=100) == "2h 05m"
     assert cu.resets_in(100 + 3 * 86400 + 4 * 3600, now=100) == "3d 4h"
     assert cu.resets_in(50, now=100) == "0m"
+
+
+def test_percentages_are_flattened_for_rules():
+    summary = {"five_hour": {"used": 40, "resets_at": None}, "seven_day": {"used": 7, "resets_at": 1}}
+    assert cu.flat(summary) == {"five_hour_used": 40, "seven_day_used": 7}
+    assert cu.flat({"five_hour": "x", "seven_day": {"resets_at": 1}}) == {}
+
+
+def test_burn_rate_needs_two_rising_samples(monkeypatch):
+    monkeypatch.setattr(cu, "_samples", [])
+    monkeypatch.setattr(cu, "_latest", None)
+    monkeypatch.setattr(cu, "credentials", lambda now=None: {"accessToken": "tok"})
+    used = [10, 20, 5] + [50] * 30
+    monkeypatch.setattr(cu, "fetch", lambda token, timeout=10: {"five_hour": {"utilization": used.pop(0)}})
+    cu.refresh(now=0)
+    assert cu.eta_full() is None                      # one sample says nothing about a rate
+    cu.refresh(now=100)                               # +10% in 100s -> 80% left = 800s
+    assert cu.eta_full() == 800
+    assert cu.latest()["eta_full_s"] == 800
+    cu.refresh(now=200)                               # usage fell (the window reset): no ETA
+    assert cu.eta_full() is None and "eta_full_s" not in cu.latest()
+    # the window stays small no matter how long the daemon runs
+    for i in range(30):
+        cu.refresh(now=1000 + i)
+    assert len(cu._samples) == cu.SAMPLES

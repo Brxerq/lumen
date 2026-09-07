@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 from lumen import paths
 from lumen.core.devices import NOTIFY, Device
@@ -33,7 +34,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 
 
 def _run(cmd: list[str], env: dict | None = None) -> None:
-    flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # CREATE_NO_WINDOW
+    flags: dict[str, Any] = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # CREATE_NO_WINDOW
     subprocess.run(cmd, check=False, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                    env={**os.environ, **(env or {})}, **flags)
 

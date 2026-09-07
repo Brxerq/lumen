@@ -58,7 +58,7 @@ def check(timeout: float = 8) -> dict:
     }
 
 
-def apply(on_ready) -> str:
+def apply(on_ready, port: int = 6733) -> str:
     """Download, stage the swap script, then call on_ready() (the caller exits)."""
     info = check()
     if not info["available"]:
@@ -91,7 +91,7 @@ def apply(on_ready) -> str:
     if digest.hexdigest() != expected:
         new.unlink(missing_ok=True)
         return "The download does not match the checksum published with the release; aborted."
-    _spawn_swapper(exe, new)
+    _spawn_swapper(exe, new, port)
     on_ready()
     return f"Updating to {info['latest']} — Lumen restarts in a moment."
 
@@ -113,7 +113,7 @@ def _expected_digest(sums_url: str, timeout: float = 30) -> str:
     return ""
 
 
-def _spawn_swapper(exe: Path, new: Path) -> None:
+def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
     # ponytail: a shell script that waits for our PID is the whole updater; a
     # signed installer/MSIX is the upgrade path if code signing ever lands.
     pid = os.getpid()
@@ -125,14 +125,21 @@ def _spawn_swapper(exe: Path, new: Path) -> None:
         # seen once in testing. Hence: settle, start, and start again if nothing
         # came up. A few seconds of waiting is cheaper than the user quietly
         # losing Lumen until they next notice.
+        #
+        # "Came up" means the dashboard answers on its port, not that a process
+        # with the right name exists. A start inside the Defender window can
+        # leave a PyInstaller bootloader that never spawns the app: one idle
+        # process, no listener — which the old name check read as success, so
+        # the retry never fired and the update ended with no daemon.
         script.write_text(
             "@echo off\r\n"
             f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n"
             f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (timeout /t 1 /nobreak >nul & goto copy)\r\n"
             "timeout /t 3 /nobreak >nul\r\n"
             f"start \"\" \"{exe}\"\r\n"
-            "timeout /t 8 /nobreak >nul\r\n"
-            f"tasklist /FI \"IMAGENAME eq {exe.name}\" | find /i \"{exe.name}\" >nul || start \"\" \"{exe}\"\r\n"
+            "timeout /t 20 /nobreak >nul\r\n"
+            f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul || ("
+            f"taskkill /f /im \"{exe.name}\" >nul 2>&1 & timeout /t 3 /nobreak >nul & start \"\" \"{exe}\")\r\n"
             "del \"%~f0\"\r\n", encoding="utf-8")
         subprocess.Popen(["cmd", "/c", str(script)], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000,
                          close_fds=True)
@@ -142,6 +149,9 @@ def _spawn_swapper(exe: Path, new: Path) -> None:
             "#!/bin/sh\n"
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
             f"mv -f '{new}' '{exe}' && chmod +x '{exe}' && sleep 2 && nohup '{exe}' >/dev/null 2>&1 &\n"
+            "sleep 20\n"
+            f"lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 || "
+            f"{{ pkill -f '{exe}'; sleep 3; nohup '{exe}' >/dev/null 2>&1 & }}\n"
             f"rm -f '{script}'\n", encoding="utf-8")
         script.chmod(0o755)
         subprocess.Popen(["/bin/sh", str(script)], start_new_session=True, close_fds=True)

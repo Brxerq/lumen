@@ -31,11 +31,41 @@ POLL_S = 300
 _lock = threading.Lock()
 _latest: dict | None = None
 _detail = "not checked yet"
+_samples: list[tuple[float, int]] = []  # (ts, five_hour used) — the burn rate window
+SAMPLES = 12
 
 
 def latest() -> dict | None:
     with _lock:
-        return dict(_latest) if _latest else None
+        if not _latest:
+            return None
+        out = dict(_latest)
+    eta = eta_full()
+    if eta is not None:
+        out["eta_full_s"] = eta
+    return out
+
+
+def flat(summary: dict) -> dict:
+    """The two percentages as plain ints beside the nested blocks, so a rule can
+    say "five_hour_used > 80" without reaching into a dict."""
+    return {f"{key}_used": summary[key]["used"] for key in ("five_hour", "seven_day")
+            if isinstance(summary.get(key), dict) and isinstance(summary[key].get("used"), int)}
+
+
+def eta_full(now: float | None = None) -> float | None:
+    """Seconds until the 5-hour window hits 100% at the rate it has been
+    filling. None while we have too few samples, or when usage is flat or
+    falling (the window reset, or you stopped working — either way, no ETA)."""
+    with _lock:
+        samples = list(_samples)
+    if len(samples) < 2:
+        return None
+    (t0, u0), (t1, u1) = samples[0], samples[-1]
+    rate = (u1 - u0) / (t1 - t0) if t1 > t0 else 0.0
+    if rate <= 0:
+        return None
+    return max(0.0, (100 - u1) / rate)
 
 
 def detail() -> str:
@@ -118,6 +148,10 @@ def refresh(now: float | None = None) -> dict | None:
     with _lock:
         if summary is not None:
             _latest = summary
+            used = (summary.get("five_hour") or {}).get("used")
+            if isinstance(used, int):
+                _samples.append((time.time() if now is None else now, used))
+                del _samples[:-SAMPLES]
         _detail = note
     return summary
 

@@ -180,6 +180,20 @@ def test_quiet_hours_stop_the_flashing_but_not_the_colours(server):
     assert light.colors[-1] == (0, 0, 0)
 
 
+def test_log_tail_returns_the_end_of_the_log(server, tmp_path, monkeypatch):
+    call, *_ = server
+    from lumen import paths
+    from lumen.server import api
+    log = tmp_path / "lumen.log"
+    monkeypatch.setattr(paths, "log_file", lambda: log)
+    assert api.log_tail() == []                                 # no file yet
+    log.write_text("\n".join(f"line {i}" for i in range(500)) + "\n", encoding="utf-8")
+    tail = api.log_tail(max_lines=3)
+    assert tail == ["line 497", "line 498", "line 499"]
+    status, out = call("GET", "/api/log")
+    assert status == 200 and out["lines"][-1] == "line 499" and len(out["lines"]) == 300
+
+
 def test_quiet_hours_settings_are_validated(tmp_path):
     config = Config(tmp_path / "c.json")
     for bad in ({"from": "25:00"}, {"to": "7"}, {"mode": "strobe"}, "nope"):
