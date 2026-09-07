@@ -16,6 +16,15 @@ All notable changes to this project are documented here. The format follows [Kee
   5-hour window (Codex Pro Lite): it falls back to the week.
 
 ### Added
+- **Drag the status tab anywhere along its edge.** Press and drag the tab
+  and it follows; let go and the spot is saved (`notch_offset`, as a
+  percentage of the screen width) so it comes back there next start. Settings
+  has the same knob as a slider, with Reset to return to the preset corner.
+- **Thin, regular or thick.** Settings → Thickness picks the folded tab's
+  height and width; the unfolded panel is unchanged.
+- **Opacity** for the tab, 30–100 %.
+- **Double-click pins the tab open** so the session list and meters stay up
+  without hovering; double-click again to let it fold.
 - **Per-model weekly limits.** The Opus, Sonnet and scoped-model weeks the
   usage endpoint reports beside the all-models week now appear as extra meters
   on the dashboard and the notch, and as `seven_day_<model>_used` rule fields.

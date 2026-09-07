@@ -37,6 +37,9 @@ DEFAULT_SETTINGS = {
     "launch_openrgb": True,       # start the OpenRGB server if the app is installed but idle
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)
     "notch_position": "top",      # top | top-left | top-right | bottom
+    "notch_offset": -1,           # where along the edge, 0..100 % of the screen width; -1 = the preset above
+    "notch_size": "regular",      # thin | regular | thick
+    "notch_opacity": 96,          # 30..100 %
     "notch_hide_fullscreen": True,  # stay out of the way of full-screen games and films
     # what the tab shows; untick down to "just my Claude limits and the live tabs"
     "notch_agents": "all",          # all | claude | codex
@@ -56,7 +59,8 @@ _HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 
 # Settings a user can put out of range. Values outside these bounds are refused
 # rather than clamped: a silently moved port is worse than an error message.
-SETTING_RANGES = {"port": (1024, 65535), "rescan_interval_s": (0, 86400)}
+SETTING_RANGES = {"port": (1024, 65535), "rescan_interval_s": (0, 86400),
+                  "notch_offset": (-1, 100), "notch_opacity": (30, 100)}
 
 
 def _coerce(key: str, value):
@@ -73,6 +77,8 @@ def _coerce(key: str, value):
         raise ValueError("notch_position: top, top-left, top-right or bottom")
     if key == "notch_agents" and value not in ("all", "claude", "codex"):
         raise ValueError("notch_agents: all, claude or codex")
+    if key == "notch_size" and value not in ("thin", "regular", "thick"):
+        raise ValueError("notch_size: thin, regular or thick")
     if key in SETTING_RANGES:
         low, high = SETTING_RANGES[key]
         assert isinstance(value, int)

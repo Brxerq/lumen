@@ -52,6 +52,9 @@ KEY = (1, 0, 1)              # Windows chroma key; on macOS the window is truly 
 LABELS = {"running": "working", "input": "needs you", "done": "done"}
 SS = 3                       # supersample factor for Pillow drawing
 POSITIONS = ("top", "top-left", "top-right", "bottom")
+# Thin, regular, thick: the folded tab's height, its bar height and its width.
+# The unfolded panel keeps its own row height; only the tab itself scales.
+SIZES = {"thin": (16, 4, 200), "regular": (HEIGHT, BAR_H, WIDTH), "thick": (34, 8, 280)}
 # Everything the tab can show, all on by default. Settings turns pieces off:
 # someone who only wants the Claude limits and the live tabs unticks the rest.
 SHOW_DEFAULTS = {"sessions": True, "context": True, "cost": True, "activity": True,
@@ -87,6 +90,8 @@ class Notch(ScreenGlow):
         self.ambient = True  # its whole purpose is the persistent sessions view
         self.details = {"connection": "built-in", "zones": ZONE_COUNT}
         self.position, self.hide_fullscreen = "top", True
+        self.offset, self.size, self.opacity = -1, "regular", 96  # along the edge (%), thin/regular/thick, %
+        self.port = 6733                  # the dashboard, so a drag can save its new place
         self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
         self.agents = "all"               # whose sessions: all | claude | codex
 
@@ -101,7 +106,8 @@ class Notch(ScreenGlow):
         from lumen.integrations.agent_sessions import all_sessions
         payload = {"sessions": all_sessions(),
                    "usage": {"claude": claude_usage.latest(), "codex": codex_usage.latest()},
-                   "options": {"position": self.position, "hide_fullscreen": self.hide_fullscreen,
+                   "options": {"position": self.position, "offset": self.offset, "size": self.size,
+                               "opacity": self.opacity, "port": self.port, "hide_fullscreen": self.hide_fullscreen,
                                "show": self.show, "agents": self.agents}}
         self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
@@ -126,6 +132,12 @@ def discover(settings: dict | None = None) -> list:
     position = str((settings or {}).get("notch_position") or "top")
     _instance.position = position if position in POSITIONS else "top"
     _instance.hide_fullscreen = bool((settings or {}).get("notch_hide_fullscreen", True))
+    s = settings or {}
+    _instance.offset = max(-1, min(100, int(s.get("notch_offset", -1) or -1)))
+    size = str(s.get("notch_size") or "regular")
+    _instance.size = size if size in SIZES else "regular"
+    _instance.opacity = max(30, min(100, int(s.get("notch_opacity", 96) or 96)))
+    _instance.port = int(s.get("port", 6733) or 6733)
     _instance.show = {k: bool((settings or {}).get(f"notch_show_{k}", v)) for k, v in SHOW_DEFAULTS.items()}
     agents = str((settings or {}).get("notch_agents") or "all")
     _instance.agents = agents if agents in ("all", "claude", "codex") else "all"
@@ -244,9 +256,28 @@ def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None, 
     return out
 
 
-def panel_row_at(y: int, n_rows: int) -> int | None:
+def tab_x(screen_w: int, tab_w: int, position: str, offset: int = -1, margin: int = 24) -> int:
+    """Where the tab's left edge goes. `offset` is its centre along the edge as
+    a percentage of the screen width (a drag sets it); -1 means the preset
+    corner the position names. Never past either side of the screen."""
+    if offset is None or offset < 0:
+        if position == "top-left":
+            return margin
+        if position == "top-right":
+            return screen_w - tab_w - margin
+        return (screen_w - tab_w) // 2
+    x = int(screen_w * min(100, offset) / 100) - tab_w // 2
+    return max(0, min(screen_w - tab_w, x))
+
+
+def offset_for(screen_w: int, tab_w: int, x: int) -> int:
+    """The inverse of tab_x: the percentage to save for a tab whose left edge is at x."""
+    return max(0, min(100, round((x + tab_w / 2) * 100 / screen_w))) if screen_w > 0 else 50
+
+
+def panel_row_at(y: int, n_rows: int, height: int = HEIGHT) -> int | None:
     """Which session row a click at image y (logical px) landed on, or None."""
-    top = HEIGHT + PANEL_PAD
+    top = height + PANEL_PAD
     if y < top:
         return None
     i = (y - top) // ROW
@@ -285,14 +316,18 @@ def usage_colour(pct: int) -> RGB:
 
 def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
            opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
-           unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0):
+           unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0,
+           size: str = "regular"):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
     platform can't do per-pixel alpha). `unfolded` = the hover panel: session
     rows, then the usage meters. `fills` is one context-window percentage per
     bar (None = solid bar); `usage` the 5-hour / 7-day summary, if known.
     `flip` rounds the top instead (the tab hangs up from the bottom edge);
-    `glow_gain` > 1 brightens the bar glow for the "needs you" pulse."""
+    `glow_gain` > 1 brightens the bar glow for the "needs you" pulse; `size`
+    picks the folded tab's thickness (thin | regular | thick)."""
     from PIL import Image, ImageDraw, ImageFilter
+
+    height, bar_h, width = SIZES.get(size, SIZES["regular"])
 
     from lumen.integrations.claude_usage import label, ordered, resets_in
 
@@ -308,8 +343,8 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                     name = agent.capitalize() + " · " + name.split(" · ", 1)[1]
                 meters.append((name, summary[k]))
     five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "seven_day") if k in s), None)
-    w = PANEL_WIDTH if unfolded else WIDTH
-    h = HEIGHT
+    w = PANEL_WIDTH if unfolded else width
+    h = height
     if unfolded:
         h += PANEL_PAD + ROW * len(rows) + (PANEL_PAD // 2 + ROW * len(meters) if meters else 0) + PANEL_PAD - 6
     W, H, R = w * SS, h * SS, RADIUS * SS
@@ -331,13 +366,13 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
         total = sum(n for _, n in bars)
         gap = BAR_GAP * SS if len(bars) > 1 else 0
         unit = (inner - gap * (len(bars) - 1)) / total
-        y0 = (HEIGHT * SS - BAR_H * SS) // 2
+        y0 = (height * SS - bar_h * SS) // 2
         glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
         x = BAR_INSET * SS
         for colour, n in bars:
             x1 = x + unit * n
-            gd.rounded_rectangle((x - 2 * SS, y0 - 2 * SS, x1 + 2 * SS, y0 + (BAR_H + 2) * SS), radius=BAR_H * SS,
+            gd.rounded_rectangle((x - 2 * SS, y0 - 2 * SS, x1 + 2 * SS, y0 + (bar_h + 2) * SS), radius=bar_h * SS,
                                  fill=colour + (int(min(255, 150 * glow_gain)),))
             x = x1 + gap
         img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(4 * SS)))
@@ -346,27 +381,27 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
         for i, (colour, n) in enumerate(bars):
             x1 = x + unit * n
             pct = fills[i] if fills and i < len(fills) else None
-            r = BAR_H * SS // 2
+            r = bar_h * SS // 2
             if pct is None:
-                d.rounded_rectangle((x, y0, x1, y0 + BAR_H * SS), radius=r, fill=colour + (255,))
+                d.rounded_rectangle((x, y0, x1, y0 + bar_h * SS), radius=r, fill=colour + (255,))
             else:  # a dim track, filled to how much of the context window the tab has used
-                d.rounded_rectangle((x, y0, x1, y0 + BAR_H * SS), radius=r, fill=colour + (70,))
-                fill_w = max(BAR_H * SS, (x1 - x) * max(0, min(100, pct)) / 100)
-                d.rounded_rectangle((x, y0, x + fill_w, y0 + BAR_H * SS), radius=r, fill=colour + (255,))
+                d.rounded_rectangle((x, y0, x1, y0 + bar_h * SS), radius=r, fill=colour + (70,))
+                fill_w = max(bar_h * SS, (x1 - x) * max(0, min(100, pct)) / 100)
+                d.rounded_rectangle((x, y0, x + fill_w, y0 + bar_h * SS), radius=r, fill=colour + (255,))
             x = x1 + gap
 
     if five is not None and not unfolded:  # "5h 23%" at the right of the folded tab
         f = _font(11 * SS, bold=True)
         colour = usage_colour(int(five))
-        d.text((W - BAR_INSET * SS, HEIGHT * SS // 2), f"{int(five)}%", font=f, fill=colour + (255,), anchor="rm")
+        d.text((W - BAR_INSET * SS, height * SS // 2), f"{int(five)}%", font=f, fill=colour + (255,), anchor="rm")
         px = d.textlength(f"{int(five)}%", font=f)
-        d.text((W - BAR_INSET * SS - px - 5 * SS, HEIGHT * SS // 2), "5h", font=_font(10 * SS),
+        d.text((W - BAR_INSET * SS - px - 5 * SS, height * SS // 2), "5h", font=_font(10 * SS),
                fill=MUTED + (255,), anchor="rm")
 
     if unfolded:
         name_f, meta_f = _font(12 * SS, bold=True), _font(12 * SS)
-        d.line((BAR_INSET * SS, HEIGHT * SS + 2 * SS, W - BAR_INSET * SS, HEIGHT * SS + 2 * SS), fill=EDGE, width=SS)
-        y = (HEIGHT + PANEL_PAD) * SS
+        d.line((BAR_INSET * SS, height * SS + 2 * SS, W - BAR_INSET * SS, height * SS + 2 * SS), fill=EDGE, width=SS)
+        y = (height + PANEL_PAD) * SS
         if not rows and not meters:
             d.text((W // 2, y + ROW * SS // 2), "No open agent tabs", font=meta_f, fill=MUTED + (255,), anchor="mm")
         for row in rows:
@@ -495,6 +530,20 @@ def focus_session(session: dict) -> bool:
         return False
 
 
+def save_setting(port, settings: dict) -> bool:
+    """Write a setting back through the daemon's own API (the child has no
+    config file of its own). False when the dashboard is not answering."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{int(port or 6733)}/api/settings", method="PUT",
+                                     data=json.dumps(settings).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return 200 <= r.status < 300
+    except (OSError, ValueError):
+        return False
+
+
 def fullscreen_app_in_front() -> bool:
     """A game, a film, a presentation: the tab stays out of the way while one is up."""
     try:
@@ -569,26 +618,34 @@ def run_child() -> int:
 
     state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "usage": {}, "options": {}, "hover": False,
              "photo": None, "pulse_until": 0.0, "waiting": set(), "fullscreen": False, "fs_checked": 0.0,
-             "reveal": 1.0}  # reveal: 0..1 of the unfolded panel shown, for the unfold animation
+             "reveal": 1.0,  # reveal: 0..1 of the unfolded panel shown, for the unfold animation
+             "offset": None, "offset_hold": 0.0,  # a dragged position, kept until the daemon confirms it
+             "drag": None, "pinned": False}       # drag: (pointer x at press, offset then); pinned: stays unfolded
 
     def position() -> str:
         pos = str(state["options"].get("position") or "top")
         return pos if pos in POSITIONS else "top"
 
+    def size() -> str:
+        s = str(state["options"].get("size") or "regular")
+        return s if s in SIZES else "regular"
+
+    def offset() -> int:
+        if state["offset"] is not None and (state["drag"] or time.time() < state["offset_hold"]):
+            return state["offset"]
+        state["offset"] = None
+        raw = state["options"].get("offset", -1)
+        return int(raw) if isinstance(raw, (int, float)) else -1
+
     def show(img):
         pos = position()
         w, h = img.width, img.height
-        if pos == "bottom":
-            x, y = (sw - w) // 2, sh - h
-        elif pos == "top-left":
-            x, y = 24, top
-        elif pos == "top-right":
-            x, y = sw - w - 24, top
-        else:
-            x, y = (sw - w) // 2, top
+        folded_h = SIZES[size()][0]
+        x = tab_x(sw, w, pos, offset())
+        y = sh - h if pos == "bottom" else top
         # unfolding: crop the panel to the revealed part so it grows out of the edge
         if state["hover"] and state["reveal"] < 1.0:
-            shown = max(HEIGHT, int(HEIGHT + (h - HEIGHT) * state["reveal"]))
+            shown = max(folded_h, int(folded_h + (h - folded_h) * state["reveal"]))
             img = img.crop((0, h - shown, w, h)) if pos == "bottom" else img.crop((0, 0, w, shown))
             if pos == "bottom":
                 y = sh - shown
@@ -622,9 +679,11 @@ def run_child() -> int:
         left = state["pulse_until"] - time.time()
         gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
         show(render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
-                    flip=position() == "bottom", glow_gain=gain))
+                    flip=position() == "bottom", glow_gain=gain, size=size()))
+        opacity = opts.get("opacity")
+        alpha = max(0.3, min(1.0, opacity / 100)) if isinstance(opacity, (int, float)) else ALPHA
         try:
-            win.attributes("-alpha", ALPHA)
+            win.attributes("-alpha", alpha)
         except tk.TclError:
             win.deiconify()
 
@@ -635,6 +694,8 @@ def run_child() -> int:
             root.after(16, animate)
 
     def hover(on):
+        if not on and state["pinned"]:
+            return  # double-clicked open: stays until double-clicked again
         if state["hover"] != on:
             state["hover"] = on
             state["reveal"] = 0.0 if on else 1.0
@@ -647,13 +708,49 @@ def run_child() -> int:
         if not state["hover"] or not rows:
             return
         y = event.y if position() != "bottom" else event.y  # the image is not mirrored, only anchored
-        i = panel_row_at(int(y), len(rows))
+        i = panel_row_at(int(y), len(rows), SIZES[size()][0])
         if i is None:
             return
         ordered = sorted(state["sessions"], key=lambda s: int(s.get("slot", 0)))
         threading.Thread(target=focus_session, args=(ordered[i],), daemon=True).start()
 
-    label.bind("<Button-1>", clicked)
+    # Drag the tab along its edge to put it anywhere; letting go saves the spot
+    # through the dashboard's settings API, so it is back there next start.
+    def press(event):
+        state["drag"] = (event.x_root, offset_for(sw, win.winfo_width(), win.winfo_rootx()), False)
+
+    def motion(event):
+        if not state["drag"]:
+            return
+        x0, off0, moved = state["drag"]
+        dx = event.x_root - x0
+        if not moved and abs(dx) < 4:
+            return
+        state["drag"] = (x0, off0, True)
+        w = win.winfo_width()
+        state["offset"] = offset_for(sw, w, tab_x(sw, w, position(), off0) + dx)
+        draw()
+
+    def release(event):
+        drag, state["drag"] = state["drag"], None
+        if not drag or not drag[2]:
+            clicked(event)
+            return
+        state["offset_hold"] = time.time() + 5.0
+        threading.Thread(target=save_setting, args=(state["options"].get("port"), {"notch_offset": state["offset"]}),
+                         daemon=True).start()
+
+    def toggle_pin(event):
+        state["pinned"] = not state["pinned"]
+        if state["pinned"]:
+            hover(True)
+        elif not pointer_inside():
+            hover(False)
+
+    label.bind("<ButtonPress-1>", press)
+    label.bind("<B1-Motion>", motion)
+    label.bind("<ButtonRelease-1>", release)
+    label.bind("<Double-Button-1>", toggle_pin)
 
     def pointer_inside() -> bool:
         px, py = win.winfo_pointerxy()
