@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-07
+
 ### Changed
 - **Your open tabs share the whole device.** A four-zone keyboard used to light
   one zone per tab and leave the rest dark, which reads as broken hardware
@@ -14,6 +16,11 @@ All notable changes to this project are documented here. The format follows [Kee
   of by a raw slot that could read "10" with four tabs open.
 
 ### Fixed
+- **MacBook keyboard backlight not detected.** The adapter always talked to
+  keyboard id 1, which newer Apple Silicon Macs don't use, so the read-back
+  failed and the device was silently dropped. It now asks CoreBrightness for
+  the real id, and a failure to load the framework is written to the log
+  instead of swallowed.
 - **Idle Claude tabs no longer report "working" forever.** Claude Code writes a
   `task-notification` prompt into the transcript when a tab is reopened with
   background work unaccounted for. Nobody answers it until that tab is focused,
@@ -50,13 +57,6 @@ All notable changes to this project are documented here. The format follows [Kee
   of the Claude Code transcript and records how many tokens the session holds
   against its window (200k, or 1M for `[1m]` models). It travels with the
   `agents.sessions` event, so devices and the dashboard can show it.
-
-### Fixed
-- **MacBook keyboard backlight not detected.** The adapter always talked to
-  keyboard id 1, which newer Apple Silicon Macs don't use, so the read-back
-  failed and the device was silently dropped. It now asks CoreBrightness for
-  the real id, and a failure to load the framework is written to the log
-  instead of swallowed.
 - **A volume for the sound.** The slider on each device row is a dimmer for a
   light and the volume for the speaker, 5% to 100%. It is rendered into the tone
   rather than set on a mixer: Windows' `winsound` has no volume control at all,
@@ -292,5 +292,6 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/Brxerq/lumen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Brxerq/lumen/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Brxerq/lumen/releases/tag/v0.3.1
