@@ -145,6 +145,13 @@ class Engine:
     def set_paused(self, value: bool) -> None:
         if value:
             self.player.paused.set()
+            if self.config.settings.get("keep_lit"):
+                # Pause means "stop reacting". With this on it does not also mean
+                # "go dark": the device keeps the colour it is showing. Holding the
+                # handle open is the only way to do that — a keyboard in direct
+                # mode falls back to its own stored profile the moment the host
+                # stops talking to it, so letting go *is* what turns it off.
+                return
             for d in self.devices:  # give the hardware back to its firmware / vendor software
                 _release(d)
             self.devices = []

@@ -659,6 +659,7 @@ function renderSettings(st) {
     ${row("Start at login", "Launch Lumen automatically when you sign in.", tog("autostart"))}
     ${row("Open this dashboard on start", "Otherwise Lumen starts in the tray.", tog("start_minimized", true))}
     ${row("Reduce flashing", "Turns flashes into pulses, never faster than twice a second.", tog("reduce_flashing"))}
+    ${row("Keep the lights on when paused", "Pausing stops Lumen reacting but leaves your devices lit as they are, instead of handing them back to their own lighting.", tog("keep_lit"))}
     ${row("Appearance", "This dashboard's colours.", `<select class="input" aria-label="Appearance" onchange="L.theme(this.value)">${THEMES.map(([v, name]) => `<option value="${v}" ${currentTheme() === v ? "selected" : ""}>${name}</option>`).join("")}</select>`)}
     ${row("Run the setup again", "Finds your devices and connects your agents again.", `<button class="btn" onclick="L.openWizard()">Start setup</button>`)}
   </div></div></div>

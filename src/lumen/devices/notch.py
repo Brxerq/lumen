@@ -600,7 +600,12 @@ def run_child() -> int:
         rows = apply_show(session_rows(state["sessions"]), flags, str(opts.get("agents") or "all"))
         if not flags.get("sessions", True):
             rows = []
-        usage = {a: s for a, s in state["usage"].items() if flags.get(f"{a}_usage", True)}
+        # The agent filter has to reach the meters too: pointing the tab at
+        # Claude and still being shown Codex's limit is what "only Claude" was
+        # meant to stop.
+        only = str(opts.get("agents") or "all")
+        usage = {a: s for a, s in state["usage"].items()
+                 if flags.get(f"{a}_usage", True) and (only == "all" or a == only)}
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
         left = state["pulse_until"] - time.time()

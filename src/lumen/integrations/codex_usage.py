@@ -25,8 +25,18 @@ from lumen.integrations.claude_usage import _when
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 AUTH_FILE = Path.home() / ".codex" / "auth.json"
-# response key -> ours. Codex names its windows by rank, not by length.
+# response key -> the window we assume it is when the response does not say how
+# long the window actually is. Codex names its windows by rank, not by length,
+# and the rank means different things on different plans: on a Pro Lite account
+# `primary_window` is the *weekly* limit (limit_window_seconds 604800) and
+# `secondary_window` is null, so trusting the rank labelled a 7-day limit that
+# resets tomorrow as "5h" — and left it reading 100% long after the user had
+# closed Codex, with no five-hour reset in sight to explain it.
 WINDOWS = {"primary": "five_hour", "secondary": "seven_day"}
+# A window is the short one or the long one, by its own stated length. Codex's
+# short window is 5h (18000s) and its long one 7 days (604800s); the split sits
+# far from both, so a plan with, say, a 24h window still lands somewhere sane.
+LONG_WINDOW_S = 24 * 3600
 POLL_S = 300
 
 _lock = threading.Lock()
@@ -90,6 +100,18 @@ def _resets(block: dict, now: float | None = None) -> float | None:
     return None
 
 
+def window_name(block: dict, fallback: str) -> str:
+    """Which of our two windows this block is, by the length it declares.
+
+    The rank in the key ("primary"/"secondary") is not the length: a Pro Lite
+    account reports its 7-day limit as the primary window and no secondary one.
+    `fallback` is the rank's guess, used only when the block does not say."""
+    seconds = block.get("limit_window_seconds", block.get("window_seconds"))
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds > 0:
+        return "seven_day" if float(seconds) >= LONG_WINDOW_S else "five_hour"
+    return fallback
+
+
 def summarize(raw: dict, now: float | None = None) -> dict:
     """The two windows we show, as {"used": 0..100, "resets_at": ts | None}.
     Windows the response lacks are left out rather than shown as zero."""
@@ -101,7 +123,12 @@ def summarize(raw: dict, now: float | None = None) -> dict:
         used = block.get("used_percent", block.get("utilization", block.get("used")))
         if not isinstance(used, (int, float)) or isinstance(used, bool):
             continue
-        out[ours] = {"used": int(round(max(0.0, min(100.0, float(used))))), "resets_at": _resets(block, now)}
+        name = window_name(block, ours)
+        # Two blocks can name the same window only if the response is odd; the
+        # one that says its own length wins over the one that fell back.
+        if name in out and name != ours:
+            continue
+        out[name] = {"used": int(round(max(0.0, min(100.0, float(used))))), "resets_at": _resets(block, now)}
     return out
 
 

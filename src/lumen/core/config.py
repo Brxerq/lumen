@@ -32,6 +32,7 @@ DEFAULT_SETTINGS = {
     "start_minimized": True,      # don't open the dashboard when the daemon starts
     "rescan_interval_s": 60,      # background device rescan; 0 = manual only
     "reduce_flashing": False,     # accessibility: no strobing, flashes become pulses <= 2 Hz
+    "keep_lit": False,            # pausing stops reacting, but leaves the light where it is
     "webhook_token": "",          # if set, POST /api/events must send it as a bearer token
     "launch_openrgb": True,       # start the OpenRGB server if the app is installed but idle
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)

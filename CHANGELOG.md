@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-07
+
+### Added
+- **Keep the lights on when paused.** Pausing has always meant "stop reacting"
+  *and* "hand the hardware back", which takes the light with it — a keyboard in
+  direct mode reverts to its own stored profile the moment nothing is writing to
+  it. Settings → "Keep the lights on when paused" holds the device instead, so it
+  stays exactly as it is until you unpause.
+
+### Fixed
+- **Codex's limit is named by its length, not its rank.** Codex reports its
+  windows as "primary" and "secondary", and Lumen read those as the 5-hour and
+  the 7-day limit. They are not the same thing: on a Pro Lite account the
+  primary window *is* the weekly limit (`limit_window_seconds` 604800) and there
+  is no secondary one, so a 7-day limit at 100% was shown as "5h 100%" — sitting
+  there long after Codex was closed, with no five-hour reset ever coming to
+  explain it. Each window is now identified by the length it declares.
+- **"Only this agent's tabs" now covers the limit meters too.** The status tab's
+  agent filter trimmed the session rows but left the other agent's usage meter
+  on screen, which is the opposite of what picking one agent asks for.
+
 ## [0.6.3] — 2026-09-07
 
 ### Fixed
@@ -20,7 +41,8 @@ All notable changes to this project are documented here. The format follows [Kee
   the config, so an update that ends with no Lumen says why instead of only
   being gone.
 - **The swap script is written with the line endings it says.** `write_text`
-  translated each `
+  translated each `
+
 ` again, so the file was really CR CR LF throughout.
 
 ## [0.6.2] — 2026-09-07
@@ -383,6 +405,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.7.0]: https://github.com/Brxerq/lumen/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Brxerq/lumen/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Brxerq/lumen/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Brxerq/lumen/compare/v0.6.0...v0.6.1

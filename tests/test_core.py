@@ -380,3 +380,28 @@ def test_asus_aura_rescan_reuses_devices(monkeypatch):
     assert asus_aura.discover() == [] and not asus_aura._cache
     fake_hid.enumerate = lambda vid, pid: [entry]
     assert asus_aura.discover()[0] is not first[0]  # replugged: fresh handle
+
+
+def test_pause_can_leave_the_devices_lit(tmp_path):
+    """Pause means "stop reacting", not "go dark", when keep_lit is on.
+
+    Letting go of the handle is what turns a keyboard off — direct mode reverts
+    to the firmware's own profile the moment nothing is writing — so the device
+    has to stay held."""
+    from lumen.core.engine import Engine
+    light = FakeLight("light")
+    engine = Engine(Config(tmp_path / "config.json"), integrations=[], discover=lambda s: [light])
+    engine.start()
+    engine.emit("agents.status", {"status": "running"})
+    lit = light.colors[-1]
+
+    engine.config.update_settings({"keep_lit": True})
+    engine.set_paused(True)
+    assert engine.devices == [light], "the device was let go of, so its colour is gone"
+    assert light.colors[-1] == lit, "paused should not repaint"
+
+    engine.set_paused(False)
+    engine.config.update_settings({"keep_lit": False})
+    engine.set_paused(True)
+    assert engine.devices == [], "without keep_lit, pause still hands the hardware back"
+    engine.stop()
