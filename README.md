@@ -18,10 +18,12 @@
 Lumen is a universal device-feedback layer for developers. Your AI coding agent finishes a task, a build fails, a deploy lands, a long command ends — and your keyboard flashes, your light bar changes color, your smart lights pulse, your screen edge glows, or you simply get a notification and a sound. Whatever hardware you have, Lumen finds the best way to tell you.
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Lumen dashboard" width="860">
+  <img src="docs/screenshots/dashboard-live.png" alt="Lumen dashboard: the live board, one block per open agent tab" width="860">
 </p>
 
 - **Automatic device detection** — plug in, scan, done. RGB keyboards, light bars, strips, smart lights, laptop backlights, plus the screen, notification center and speaker every machine already has.
+- **A status tab at the top of the screen** — a small always-on-top notch on Windows, macOS and Linux: one bar per open Claude or Codex tab in its status colour, filling as that tab's context window does. Hover to unfold it, click a row to focus that terminal, drag it to any edge, double-click to pin, hide it when idle.
+- **Knows what each tab is doing** — activity ("Editing api.py", "Asking you"), context-window use and session cost per tab, plus your Claude and Codex 5-hour, 7-day and per-model limits read from the login your agent already holds, with reset countdowns and burn rate. All of it is on the tab, the dashboard, and in the rule builder (`five_hour_used >= 90`).
 - **Works without RGB** — a MacBook or a plain laptop still gets a screen glow, a system notification and a sound.
 - **Event-driven automations** — `WHEN agent.finished THEN keyboard → flash green ×2 AND notification`. A visual rule builder, no config files.
 - **Integrations** — Claude Code, Codex, GitHub Actions, any shell command, timers, and a local webhook for everything else.
@@ -79,6 +81,10 @@ The first run opens the dashboard at <http://127.0.0.1:6733> and walks you throu
 |---|---|
 | ![Devices](docs/screenshots/devices.png) | ![Automations](docs/screenshots/automations.png) |
 
+| Integrations — both agents' limits, resets and events |
+|---|
+| ![Integrations](docs/screenshots/integrations.png) |
+
 ## Supported devices
 
 | Device | Adapter | Capabilities | Notes |
@@ -102,8 +108,8 @@ Want your hardware here? See [docs/PLUGINS.md](docs/PLUGINS.md) — most adapter
 
 | Source | How | Events |
 |---|---|---|
-| **Claude Code** (CLI, VS Code, Cursor, JetBrains, desktop) | One-click hook install, plus a hook-free transcript fallback | `agent.running`, `agent.needs_input`, `agent.finished`, `agents.status`, `agents.sessions` (the open tabs share the keyboard zones) |
-| **Codex** (CLI, VS Code, desktop) | Hook install + rollout fallback | same |
+| **Claude Code** (CLI, VS Code, Cursor, JetBrains, desktop) | One-click hook install, plus a hook-free transcript fallback | `agent.running`, `agent.needs_input`, `agent.finished`, `agents.status`, `agents.sessions` (the open tabs share the keyboard zones), `claude.usage` (5-hour, 7-day and per-model limits) |
+| **Codex** (CLI, VS Code, desktop) | Hook install + rollout fallback | same, plus `codex.usage` |
 | **GitHub Actions** | Polls `gh run list` for the repos you choose | `github.workflow.succeeded` / `.failed` |
 | **Terminal & scripts** | `lumen exec -- <cmd>`, `lumen emit <type>`, `lumen timer 25m`, shell snippet for slow commands | `command.*`, `timer.finished`, anything |
 | **Webhook** | `POST /api/events {"type": "build.failed"}` | anything |
