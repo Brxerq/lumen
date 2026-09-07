@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from lumen import __version__
+from lumen import __version__, paths
 
 REPO = "Brxerq/lumen"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -132,25 +132,54 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
         # "Came up" means the dashboard answers on its port, not that a process
         # with the right name exists: a start inside the Defender window can
         # leave a PyInstaller bootloader that never spawns the app — one idle
-        # process, no listener, which a name check reads as success. Four
-        # rounds of start-and-probe give the scan about a minute to finish.
+        # process, no listener, which a name check reads as success.
+        #
+        # The relaunch goes through PowerShell's Start-Process, not cmd's
+        # `start`. Measured on the machine where this kept failing: `start` from
+        # this console-less script never produced a working daemon (three
+        # updates, three times nothing), while Start-Process had the port open
+        # 2.5s later, every time. Start-Process gives the new process a clean
+        # environment instead of handing it whatever this script inherited from
+        # a windowed parent with no valid stdio.
+        #
+        # Whatever happens is appended to update.log next to the config, because
+        # a failed update takes the dashboard with it: without this the only
+        # evidence is that Lumen is gone.
+        launch = ("powershell -NoProfile -WindowStyle Hidden -Command "
+                  f"\"Start-Process -FilePath '{exe}'\"")
         probe = f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul"
+        log = str(paths.data_dir() / "update.log")
         script.write_text(
             "@echo off\r\n"
             f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
             f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
+            f"echo %DATE% %TIME% swapped in the new binary>>\"{log}\"\r\n"
             "ping -n 4 127.0.0.1 >nul\r\n"
             "set /a tries=0\r\n"
-            f":launch\r\nstart \"\" \"{exe}\"\r\n"
-            "ping -n 16 127.0.0.1 >nul\r\n"
+            f":launch\r\n{launch}\r\n"
+            # Probe every 2s for 30s rather than sleeping one long block: a cold
+            # start opens the port in about 3s, so a healthy update is done long
+            # before the first round would have ended.
+            "set /a waited=0\r\n"
+            f":probe\r\nping -n 3 127.0.0.1 >nul\r\n"
             f"{probe} && goto done\r\n"
+            "set /a waited+=2\r\n"
+            "if %waited% LSS 30 goto probe\r\n"
+            # Only now is it really dead: clear whatever half-started and retry.
             f"taskkill /f /im \"{exe.name}\" >nul 2>&1\r\n"
             "set /a tries+=1\r\n"
-            "if %tries% LSS 4 goto launch\r\n"
-            ":done\r\n"
-            "del \"%~f0\"\r\n", encoding="utf-8")
+            f"echo %DATE% %TIME% no dashboard on port {port} after 30s, retry %tries%>>\"{log}\"\r\n"
+            "if %tries% LSS 3 goto launch\r\n"
+            f"echo %DATE% %TIME% GAVE UP - start Lumen by hand>>\"{log}\"\r\n"
+            "goto end\r\n"
+            f":done\r\necho %DATE% %TIME% up and answering on port {port}>>\"{log}\"\r\n"
+            ":end\r\n"
+            # newline="": the lines above already end in CRLF, and text mode
+            # would translate each one again into CR CR LF.
+            "del \"%~f0\"\r\n", encoding="utf-8", newline="")
         subprocess.Popen(["cmd", "/c", str(script)], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000,
-                         close_fds=True)
+                         close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
     else:
         script = Path(tempfile.gettempdir()) / "lumen-update.sh"
         script.write_text(

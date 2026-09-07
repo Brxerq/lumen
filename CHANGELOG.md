@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-09-07
+
+### Fixed
+- **The update actually restarts Lumen.** Swapping the binary always worked;
+  starting it again did not. cmd's `start`, from a script with no console and
+  no valid stdio to inherit, never produced a working daemon here — three
+  updates, three times nothing, while the same binary launched by hand was
+  answering in 2.5 seconds. The relaunch goes through PowerShell's
+  `Start-Process` now, which gives the new process a clean environment, and the
+  script probes the dashboard port every two seconds for thirty rather than
+  killing a daemon that was merely still starting. Measured end to end: back up
+  6.6s after the swap.
+- **A failed update leaves evidence.** Every step writes to `update.log` beside
+  the config, so an update that ends with no Lumen says why instead of only
+  being gone.
+- **The swap script is written with the line endings it says.** `write_text`
+  translated each `
+` again, so the file was really CR CR LF throughout.
+
 ## [0.6.2] — 2026-09-07
 
 ### Fixed
@@ -364,6 +383,7 @@ First release of Lumen: a universal device-feedback platform.
   templates; CI on three platforms.
 
 [unreleased]: https://github.com/Brxerq/lumen/compare/v0.4.0...HEAD
+[0.6.3]: https://github.com/Brxerq/lumen/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Brxerq/lumen/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Brxerq/lumen/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Brxerq/lumen/compare/v0.5.0...v0.6.0
