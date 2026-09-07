@@ -9,9 +9,10 @@ folder, state. All zones black hides the tab.
 
 Same shape as the screen glow: a tkinter child process fed over stdin, one
 line per update — "r g b" for a single colour or "r g b r g b ..." per zone,
-optionally followed by " | " and the live session list as JSON (the device
-sits in the daemon, so it can hand the child what the keyboard cannot show:
-which tab is which, and how full its context window is). The picture itself
+optionally followed by " | " and JSON {"sessions": [...], "usage": {...}} (the
+device sits in the daemon, so it can hand the child what the keyboard cannot
+show: which tab is which, how full its context window is, and how much of the
+5-hour and 7-day Claude limits are gone). The picture itself
 is drawn by Pillow (supersampled, so edges and text are smooth) and handed to
 Tk as a PNG. Settings → "Status tab at the top of the screen" turns it off.
 
@@ -32,6 +33,8 @@ ZONE_COUNT = 6
 # Geometry (logical px). The tab is a flat-topped capsule; hover widens it into a panel.
 WIDTH, HEIGHT, RADIUS = 236, 24, 12
 PANEL_WIDTH, ROW, PANEL_PAD = 372, 30, 12
+USAGE_W = 58                 # room at the right of the folded tab for "5h 23%"
+METER_H = 4
 BAR_H, BAR_GAP, BAR_INSET = 6, 6, 20
 ALPHA = 0.96
 SHELL = (12, 13, 17)
@@ -64,8 +67,10 @@ class Notch(ScreenGlow):
         self.set_zones([tuple(rgb)] * ZONE_COUNT)
 
     def set_zones(self, colors: list[RGB]) -> None:
+        from lumen.integrations import claude_usage
         from lumen.integrations.agent_sessions import all_sessions
-        self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(all_sessions()))
+        payload = {"sessions": all_sessions(), "usage": claude_usage.latest()}
+        self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
 
 _instance: Notch | None = None
@@ -94,17 +99,25 @@ def discover(settings: dict | None = None) -> list:
 # Child process: pure functions first (tested), then the Tk loop
 # ---------------------------------------------------------------------------
 
-def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict]] | None:
-    """One stdin line: zones, and the session list if the daemon sent one."""
+def parse_line(line: str, n: int = ZONE_COUNT) -> tuple[list[RGB], list[dict], dict] | None:
+    """One stdin line: zones, the session list and the usage summary (both empty if absent)."""
     colours, _, extra = line.partition("|")
     zones = parse_zones(colours, n)
     if zones is None:
         return None
     try:
-        sessions = json.loads(extra) if extra.strip() else []
+        payload = json.loads(extra) if extra.strip() else {}
     except ValueError:
-        sessions = []
-    return zones, ([s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else [])
+        payload = {}
+    if isinstance(payload, list):  # an older daemon: the bare session list
+        payload = {"sessions": payload}
+    if not isinstance(payload, dict):
+        payload = {}
+    sessions = payload.get("sessions") or []
+    usage = payload.get("usage") or {}
+    return (zones, [s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else [],
+            {k: v for k, v in usage.items() if isinstance(v, dict) and isinstance(v.get("used"), (int, float))}
+            if isinstance(usage, dict) else {})
 
 
 def parse_zones(line: str, n: int = ZONE_COUNT) -> list[RGB] | None:
@@ -165,15 +178,30 @@ def _font(size: int, bold: bool = False):
         return ImageFont.load_default()
 
 
+def usage_colour(pct: int) -> RGB:
+    """Calm until it matters: neutral, amber past 70 %, red past 90 %."""
+    return (230, 70, 70) if pct >= 90 else (240, 170, 40) if pct >= 70 else (150, 154, 168)
+
+
 def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palette: dict[str, RGB],
-           opaque_key: RGB | None = None, fills: list[int | None] | None = None):
+           opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
+           unfolded: bool = False, now: float | None = None):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
-    platform can't do per-pixel alpha). Rows non-empty = the unfolded panel.
-    `fills` is one context-window percentage per bar (None = solid bar)."""
+    platform can't do per-pixel alpha). `unfolded` = the hover panel: session
+    rows, then the usage meters. `fills` is one context-window percentage per
+    bar (None = solid bar); `usage` the 5-hour / 7-day summary, if known."""
     from PIL import Image, ImageDraw, ImageFilter
 
-    w = PANEL_WIDTH if rows else WIDTH
-    h = HEIGHT + (PANEL_PAD + ROW * len(rows) + PANEL_PAD - 6 if rows else 0)
+    from lumen.integrations.claude_usage import resets_in
+
+    usage = usage or {}
+    meters = [(name, usage[k]) for k, name in (("five_hour", "Session · 5 hours"), ("seven_day", "Week · 7 days"))
+              if k in usage] if unfolded else []
+    five = usage.get("five_hour", {}).get("used") if usage else None
+    w = PANEL_WIDTH if unfolded else WIDTH
+    h = HEIGHT
+    if unfolded:
+        h += PANEL_PAD + ROW * len(rows) + (PANEL_PAD // 2 + ROW * len(meters) if meters else 0) + PANEL_PAD - 6
     W, H, R = w * SS, h * SS, RADIUS * SS
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -185,7 +213,7 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
     # session bars, each lit from beneath
     bars = runs(zones)
     if bars:
-        inner = W - 2 * BAR_INSET * SS
+        inner = W - 2 * BAR_INSET * SS - (USAGE_W * SS if five is not None and not unfolded else 0)
         total = sum(n for _, n in bars)
         gap = BAR_GAP * SS if len(bars) > 1 else 0
         unit = (inner - gap * (len(bars) - 1)) / total
@@ -213,10 +241,20 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
                 d.rounded_rectangle((x, y0, x + fill_w, y0 + BAR_H * SS), radius=r, fill=colour + (255,))
             x = x1 + gap
 
-    if rows:
+    if five is not None and not unfolded:  # "5h 23%" at the right of the folded tab
+        f = _font(11 * SS, bold=True)
+        colour = usage_colour(int(five))
+        d.text((W - BAR_INSET * SS, HEIGHT * SS // 2), f"{int(five)}%", font=f, fill=colour + (255,), anchor="rm")
+        px = d.textlength(f"{int(five)}%", font=f)
+        d.text((W - BAR_INSET * SS - px - 5 * SS, HEIGHT * SS // 2), "5h", font=_font(10 * SS),
+               fill=MUTED + (255,), anchor="rm")
+
+    if unfolded:
         name_f, meta_f = _font(12 * SS, bold=True), _font(12 * SS)
         d.line((BAR_INSET * SS, HEIGHT * SS + 2 * SS, W - BAR_INSET * SS, HEIGHT * SS + 2 * SS), fill=EDGE, width=SS)
         y = (HEIGHT + PANEL_PAD) * SS
+        if not rows and not meters:
+            d.text((W // 2, y + ROW * SS // 2), "No open agent tabs", font=meta_f, fill=MUTED + (255,), anchor="mm")
         for agent, folder, status, pct in rows:
             colour = tuple(palette.get(status, MUTED[:3]))
             cy = y + ROW * SS // 2
@@ -230,6 +268,24 @@ def render(zones: list[RGB], rows: list[tuple[str, str, str, int | None]], palet
                 lx = W - BAR_INSET * SS - d.textlength(label, font=meta_f) - 12 * SS
                 d.text((lx, cy), f"{pct}%", font=meta_f, fill=MUTED + (255,), anchor="rm")
             y += ROW * SS
+        if meters:  # the subscription limits: a label, a thin meter, the number and the reset time
+            if rows:
+                d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=EDGE, width=SS)
+                y += PANEL_PAD * SS // 2
+            small = _font(11 * SS)
+            for name, block in meters:
+                pct = int(block["used"])
+                colour = usage_colour(pct)
+                cy = y + ROW * SS // 2
+                d.text((BAR_INSET * SS, cy - 7 * SS), name, font=small, fill=MUTED + (255,), anchor="lm")
+                left = resets_in(block.get("resets_at"), now)
+                right = f"{pct}%" + (f"  ·  resets in {left}" if left else "")
+                d.text((W - BAR_INSET * SS, cy - 7 * SS), right, font=small, fill=INK + (255,), anchor="rm")
+                mx0, mx1, my = BAR_INSET * SS, W - BAR_INSET * SS, cy + 6 * SS
+                d.rounded_rectangle((mx0, my, mx1, my + METER_H * SS), radius=METER_H * SS // 2, fill=(255, 255, 255, 28))
+                fw = max(METER_H * SS, (mx1 - mx0) * pct / 100)
+                d.rounded_rectangle((mx0, my, mx0 + fw, my + METER_H * SS), radius=METER_H * SS // 2, fill=colour + (255,))
+                y += ROW * SS
 
     img = img.resize((w, h), Image.LANCZOS)
     if opaque_key is not None:
@@ -282,7 +338,7 @@ def run_child() -> int:
     label.pack()
     top = _top_inset()
 
-    state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "hover": False, "photo": None}
+    state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "usage": {}, "hover": False, "photo": None}
 
     def show(img):
         buf = io.BytesIO()
@@ -303,7 +359,7 @@ def run_child() -> int:
         rows = session_rows(state["sessions"])
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
-        show(render(zones, rows if state["hover"] else [], DEFAULT_PALETTE, key, fills))
+        show(render(zones, rows, DEFAULT_PALETTE, key, fills, state["usage"], unfolded=state["hover"]))
         try:
             win.attributes("-alpha", ALPHA)
         except tk.TclError:
@@ -314,8 +370,15 @@ def run_child() -> int:
             state["hover"] = on
             draw()
 
+    def pointer_inside() -> bool:
+        px, py = win.winfo_pointerxy()
+        x, y = win.winfo_rootx(), win.winfo_rooty()
+        return x <= px < x + win.winfo_width() and y <= py < y + win.winfo_height()
+
+    # Unfolding resizes the window under the pointer, which Tk reports as a
+    # Leave: only fold back once the pointer has really left the (new) tab.
     win.bind("<Enter>", lambda e: hover(True))
-    win.bind("<Leave>", lambda e: hover(False))
+    win.bind("<Leave>", lambda e: root.after(150, lambda: None if pointer_inside() else hover(False)))
 
     lines: queue.Queue = queue.Queue()
 
@@ -337,8 +400,8 @@ def run_child() -> int:
                 root.destroy()
                 return
             last = item
-        if last and (parsed := parse_line(last)) is not None and list(parsed) != [state["zones"], state["sessions"]]:
-            state["zones"], state["sessions"] = parsed
+        if last and (parsed := parse_line(last)) is not None and list(parsed) != [state["zones"], state["sessions"], state["usage"]]:
+            state["zones"], state["sessions"], state["usage"] = parsed
             draw()
         root.after(16, poll)
 

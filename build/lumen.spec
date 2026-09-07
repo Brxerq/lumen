@@ -9,7 +9,7 @@ hidden = [
     # adapters and integrations are imported by name at runtime
     "lumen.devices.asus_aura", "lumen.devices.openrgb", "lumen.devices.linux_backlight", "lumen.devices.mac_backlight", "lumen.devices.govee",
     "lumen.devices.hue", "lumen.devices.screen", "lumen.devices.notch", "lumen.devices.notification", "lumen.devices.sound",
-    "lumen.integrations.claude_code", "lumen.integrations.codex", "lumen.integrations.webhook",
+    "lumen.integrations.claude_code", "lumen.integrations.claude_usage", "lumen.integrations.codex", "lumen.integrations.webhook",
     "lumen.integrations.terminal", "lumen.integrations.github", "lumen.app.update",
 ] + (["pystray._win32"] if sys.platform == "win32" else ["pystray._darwin", "objc", "Foundation", "AppKit"] if sys.platform == "darwin" else ["pystray._xorg"])
 

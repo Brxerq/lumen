@@ -37,6 +37,15 @@ All notable changes to this project are documented here. The format follows [Kee
   every live session's agent, name or folder, context use and state. It hides
   itself when no tab is open, and Settings → "Status tab at the top of the
   screen" turns it off. Inspired by codenotch, without the Mac-only part.
+- **Your Claude limits, without signing in again.** Lumen reads the login
+  Claude Code already holds (the macOS keychain, or `~/.claude/.credentials.json`)
+  and asks the same endpoint Claude Code's `/usage` does, every five minutes,
+  for the 5-hour and 7-day windows. The token is used read-only — Lumen never
+  refreshes it, so it cannot log Claude Code out; an expired one just means no
+  numbers until Claude Code signs in again. The folded status tab shows the
+  5-hour figure, the hover panel both meters with their reset countdowns, the
+  Integrations page the same, and a `claude.usage` event fires when they move
+  so a rule can warn you at 90 %.
 - **Context-window use per session.** The hook reads the last assistant turn
   of the Claude Code transcript and records how many tokens the session holds
   against its window (200k, or 1M for `[1m]` models). It travels with the

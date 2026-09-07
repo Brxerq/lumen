@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 
+from lumen.core.events import Event
+from lumen.integrations import claude_usage
 from lumen.integrations.agent_sessions import CLAUDE_HOOKS, AgentIntegration
 
 CLAUDE_HOME = Path.home() / ".claude"
@@ -84,7 +87,7 @@ class ClaudeCode(AgentIntegration):
     agent = "claude"
     name = "Claude Code"
     description = "Anthropic's coding agent — CLI, VS Code, Cursor, JetBrains, desktop app."
-    events = ("agent.running", "agent.needs_input", "agent.finished", "agents.status")
+    events = ("agent.running", "agent.needs_input", "agent.finished", "agents.status", "claude.usage")
     hooks_file = CLAUDE_HOME / "settings.json"
     hooks = CLAUDE_HOOKS
     docs = ("Connect installs a hook command in `~/.claude/settings.json` that reports each session's "
@@ -93,6 +96,33 @@ class ClaudeCode(AgentIntegration):
 
     def truth(self, hooked: dict[str, str]) -> dict[str, bool]:
         return transcript_states()
+
+    def start(self) -> None:
+        super().start()
+        threading.Thread(target=self._usage_loop, name="lumen-claude-usage", daemon=True).start()
+
+    def _usage_loop(self) -> None:
+        """The 5-hour / 7-day limits, every few minutes, as a claude.usage event when they move."""
+        last = None
+        while not self._stop.is_set():
+            try:
+                usage = claude_usage.refresh()
+            except Exception as e:  # never let the usage poll take the session poll down
+                usage = None
+                print(f"claude: usage poll failed: {type(e).__name__}: {e}", flush=True)
+            if usage is not None and usage != last:
+                last = usage
+                self.emit(Event("claude.usage", self.agent, {"agent": self.agent, **usage}))
+            self._stop.wait(claude_usage.POLL_S)
+
+    def status(self) -> dict:
+        out = super().status()
+        usage = claude_usage.latest()
+        if usage:
+            parts = [f"{name} {usage[k]['used']}%" for k, name in (("five_hour", "5h"), ("seven_day", "7d")) if k in usage]
+            out["detail"] += " · " + " · ".join(parts)
+        out["usage"] = usage
+        return out
 
 
 INTEGRATION = ClaudeCode

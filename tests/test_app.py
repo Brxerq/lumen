@@ -105,9 +105,12 @@ def test_notch_child_parses_zones_and_the_session_list():
     sessions = [{"id": "b", "agent": "codex", "slot": 1, "status": "input", "cwd": "/w/api", "label": "",
                  "context": {"tokens": 50_000, "window": 200_000}},
                 {"id": "a", "agent": "claude", "slot": 0, "status": "running", "cwd": "C:/w/web/", "label": "API refactor"}]
-    zones, got = notch.parse_line("1 2 3 | " + json.dumps(sessions), n=2)
-    assert zones == [(1, 2, 3)] * 2 and [s["id"] for s in got] == ["b", "a"]
-    assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [])   # a bad payload never kills the tab
+    zones, got, usage = notch.parse_line("1 2 3 | " + json.dumps(sessions), n=2)   # the 0.4 shape: a bare list
+    assert zones == [(1, 2, 3)] * 2 and [s["id"] for s in got] == ["b", "a"] and usage == {}
+    payload = {"sessions": sessions, "usage": {"five_hour": {"used": 23, "resets_at": 1.0}, "junk": 1, "seven_day": {"x": 1}}}
+    zones, got, usage = notch.parse_line("1 2 3 | " + json.dumps(payload), n=2)
+    assert [s["id"] for s in got] == ["b", "a"] and usage == {"five_hour": {"used": 23, "resets_at": 1.0}}
+    assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [], {})   # a bad payload never kills the tab
     assert notch.parse_line("nope | []") is None
     # rows follow the zones (slot order); a named tab shows its name, an unnamed one its folder
     assert notch.session_rows(got) == [("claude", "API refactor", "running", None), ("codex", "api", "input", 25)]
@@ -119,9 +122,14 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     from lumen.devices import notch
     palette = {"running": (240, 170, 40), "input": (230, 60, 60)}
     rows = [("claude", "web", "running", 63), ("codex", "api", "input", None)]
-    folded = notch.render([(240, 170, 40)] * 6, [], palette, opaque_key=(1, 0, 1), fills=[63])
-    panel = notch.render([(240, 170, 40)] * 3 + [(230, 60, 60)] * 3, rows, palette)
-    assert folded.size == (notch.WIDTH, notch.HEIGHT) and panel.size[0] == notch.PANEL_WIDTH and panel.size[1] > notch.HEIGHT
+    usage = {"five_hour": {"used": 23, "resets_at": 7200.0}, "seven_day": {"used": 91, "resets_at": None}}
+    folded = notch.render([(240, 170, 40)] * 6, [], palette, opaque_key=(1, 0, 1), fills=[63], usage=usage)
+    panel = notch.render([(240, 170, 40)] * 3 + [(230, 60, 60)] * 3, rows, palette, usage=usage, unfolded=True, now=0.0)
+    bare = notch.render([(240, 170, 40)] * 3 + [(230, 60, 60)] * 3, rows, palette, unfolded=True)
+    empty = notch.render([(1, 1, 1)] * 6, [], palette, unfolded=True)
+    assert folded.size == (notch.WIDTH, notch.HEIGHT) and panel.size[0] == notch.PANEL_WIDTH
+    assert panel.height > bare.height > notch.HEIGHT and empty.height > notch.HEIGHT   # meters add rows; "no tabs" still opens
+    assert notch.usage_colour(10) != notch.usage_colour(75) != notch.usage_colour(95)
     assert folded.getpixel((0, notch.HEIGHT - 1))[:3] == (1, 0, 1)   # rounded corner shows the chroma key
     assert panel.getpixel((0, panel.height - 1))[3] == 0            # ...or real transparency
     d = notch.Notch()
@@ -131,7 +139,7 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     d.set_color((1, 2, 3))
     d.set_zones([(0, 0, 0), (9, 9, 9)])
     assert [x.split(" | ")[0] for x in sent] == ["1 2 3 " * (notch.ZONE_COUNT - 1) + "1 2 3", "0 0 0 9 9 9"]
-    assert all(isinstance(json.loads(x.split(" | ")[1]), list) for x in sent)  # the live session list rides along
+    assert all(set(json.loads(x.split(" | ")[1])) == {"sessions", "usage"} for x in sent)  # live sessions + limits ride along
     # the setting takes the tab down and keeps it down; no child is spawned in tests
     monkeypatch.setattr(notch.Notch, "warm_up", lambda self: None)
     shut = []
