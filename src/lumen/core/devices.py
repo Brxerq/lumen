@@ -120,6 +120,7 @@ BUILTIN_ADAPTERS = [
     "lumen.devices.govee",
     "lumen.devices.hue",
     "lumen.devices.screen",
+    "lumen.devices.notch",
     "lumen.devices.notification",
     "lumen.devices.sound",
 ]

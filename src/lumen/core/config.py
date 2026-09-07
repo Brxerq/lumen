@@ -34,6 +34,7 @@ DEFAULT_SETTINGS = {
     "reduce_flashing": False,     # accessibility: no strobing, flashes become pulses <= 2 Hz
     "webhook_token": "",          # if set, POST /api/events must send it as a bearer token
     "launch_openrgb": True,       # start the OpenRGB server if the app is installed but idle
+    "notch": True,                # the status tab at the top of the screen (devices/notch.py)
     "log_events": True,
     # No flashing (or no light at all) between these hours. Local time, and a
     # window that wraps midnight is the normal case.

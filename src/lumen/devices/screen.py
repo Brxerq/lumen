@@ -39,10 +39,13 @@ class ScreenGlow(Device):
         self._lock = threading.Lock()
         self.max_fps = 30
 
+    def child_command(self) -> list[str]:
+        return child_command()
+
     def _child(self):
         if self._proc is None or self._proc.poll() is not None:
             flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
-            self._proc = subprocess.Popen(child_command(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            self._proc = subprocess.Popen(self.child_command(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL, text=True, **flags)
         return self._proc
 
@@ -54,10 +57,13 @@ class ScreenGlow(Device):
                 self._proc = None
 
     def set_color(self, rgb) -> None:
+        self._send("%d %d %d" % tuple(rgb))
+
+    def _send(self, line: str) -> None:
         with self._lock:
             try:
                 child = self._child()
-                child.stdin.write("%d %d %d\n" % tuple(rgb))
+                child.stdin.write(line + "\n")
                 child.stdin.flush()
             except (OSError, ValueError) as e:
                 self._proc = None

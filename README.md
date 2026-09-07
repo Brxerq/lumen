@@ -90,6 +90,7 @@ The first run opens the dashboard at <http://127.0.0.1:6733> and walks you throu
 | Philips Hue | `hue` | color, brightness | Bridge found automatically; pair from the Devices page. Restores the previous light state after an effect. |
 | Govee lights | `govee` | color, brightness | LAN API (enable *LAN Control* in the Govee app). No cloud key. |
 | Screen edge glow | `screen` | color | Thin always-on-top border on any OS. Transient effects only unless targeted explicitly. |
+| Notch status tab | `notch` | color, zones | Dark tab hanging from the top of the screen; one lit bar per open agent tab that fills with its context window, hover for details. Hidden when idle; toggle in Settings. |
 | System notifications | `notification` | notify | Windows toast, macOS notification center, `notify-send`. |
 | System sounds | `sound` | sound | Eight tones — chime, blip, knock, descend, bell, ping, fanfare, alert — synthesised on first use, so every platform sounds the same and nothing is licensed from anyone. Pick one per automation; the slider on the Devices page is the volume. |
 

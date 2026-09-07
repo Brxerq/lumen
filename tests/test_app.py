@@ -95,6 +95,52 @@ def test_screen_child_parses_one_colour_per_line():
     assert screen.parse_line("999 -5 0") == (255, 0, 0)
 
 
+# --- notch status tab child -------------------------------------------------------
+def test_notch_child_parses_zones_and_the_session_list():
+    from lumen.devices import notch
+    assert notch.parse_zones("255 0 0", n=3) == [(255, 0, 0)] * 3
+    assert notch.parse_zones("1 2 3 4 5 6 7", n=3) == [(1, 2, 3), (4, 5, 6), (4, 5, 6)]  # trailing partial dropped
+    assert notch.parse_zones("999 -1 0 0 0 0 0 0 0 0 0 0", n=2) == [(255, 0, 0), (0, 0, 0)]
+    assert [notch.parse_zones(x) for x in ("", "1 2", "a b c")] == [None, None, None]
+    sessions = [{"id": "b", "agent": "codex", "slot": 1, "status": "input", "cwd": "/w/api", "label": "",
+                 "context": {"tokens": 50_000, "window": 200_000}},
+                {"id": "a", "agent": "claude", "slot": 0, "status": "running", "cwd": "C:/w/web/", "label": "API refactor"}]
+    zones, got = notch.parse_line("1 2 3 | " + json.dumps(sessions), n=2)
+    assert zones == [(1, 2, 3)] * 2 and [s["id"] for s in got] == ["b", "a"]
+    assert notch.parse_line("1 2 3 | not json", n=1) == ([(1, 2, 3)], [])   # a bad payload never kills the tab
+    assert notch.parse_line("nope | []") is None
+    # rows follow the zones (slot order); a named tab shows its name, an unnamed one its folder
+    assert notch.session_rows(got) == [("claude", "API refactor", "running", None), ("codex", "api", "input", 25)]
+    # adjacent zones of one colour are one tab's bar; black is a free seat, not a bar
+    assert notch.runs([(1, 1, 1), (1, 1, 1), (0, 0, 0), (2, 2, 2)]) == [((1, 1, 1), 2), ((2, 2, 2), 1)]
+
+
+def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
+    from lumen.devices import notch
+    palette = {"running": (240, 170, 40), "input": (230, 60, 60)}
+    rows = [("claude", "web", "running", 63), ("codex", "api", "input", None)]
+    folded = notch.render([(240, 170, 40)] * 6, [], palette, opaque_key=(1, 0, 1), fills=[63])
+    panel = notch.render([(240, 170, 40)] * 3 + [(230, 60, 60)] * 3, rows, palette)
+    assert folded.size == (notch.WIDTH, notch.HEIGHT) and panel.size[0] == notch.PANEL_WIDTH and panel.size[1] > notch.HEIGHT
+    assert folded.getpixel((0, notch.HEIGHT - 1))[:3] == (1, 0, 1)   # rounded corner shows the chroma key
+    assert panel.getpixel((0, panel.height - 1))[3] == 0            # ...or real transparency
+    d = notch.Notch()
+    assert d.id == "notch" and d.zone_count == notch.ZONE_COUNT and d.capabilities == {"color", "zones"} and d.ambient
+    sent = []
+    d._send = sent.append
+    d.set_color((1, 2, 3))
+    d.set_zones([(0, 0, 0), (9, 9, 9)])
+    assert [x.split(" | ")[0] for x in sent] == ["1 2 3 " * (notch.ZONE_COUNT - 1) + "1 2 3", "0 0 0 9 9 9"]
+    assert all(isinstance(json.loads(x.split(" | ")[1]), list) for x in sent)  # the live session list rides along
+    # the setting takes the tab down and keeps it down; no child is spawned in tests
+    monkeypatch.setattr(notch.Notch, "warm_up", lambda self: None)
+    shut = []
+    monkeypatch.setattr(notch.Notch, "shutdown", lambda self: shut.append(1))
+    assert [x.id for x in notch.discover({"notch": True})] == ["notch"]
+    assert notch.discover({"notch": False}) == [] and shut == [1]
+    assert [x.id for x in notch.discover()] == ["notch"]
+
+
 def test_adapter_setup_action_reaches_the_adapter(server, monkeypatch):
     call, engine, *_ = server
     from lumen.devices import hue

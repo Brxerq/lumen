@@ -89,6 +89,8 @@ class Engine:
         self._sync_player()
         self.player.repaint()
         self.bump()
+        # a built-in the user switched on or off (the notch tab) appears or goes on the next scan
+        threading.Thread(target=self.scan, name="lumen-settings-scan", daemon=True).start()
 
     def request_exit(self) -> None:
         """Ask the host process to shut down cleanly (after the response is sent)."""

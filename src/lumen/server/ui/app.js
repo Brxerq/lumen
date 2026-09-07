@@ -658,6 +658,7 @@ function renderSettings(st) {
   </div></div></div>
 
   <div class="section"><div class="section-head"><h2>Devices &amp; engine</h2></div><div class="card"><div class="rows">
+    ${row("Status tab at the top of the screen", "A small dark tab under the top edge: one lit bar per open agent tab, hover it for details and context-window use.", tog("notch"))}
     ${row("Start OpenRGB automatically", "Launches the OpenRGB server when it is installed but not running.", tog("launch_openrgb"))}
     ${row("Look for new devices every", "Seconds between background scans. Set to 0 to scan only when you press the button.", `<input type="number" class="input num" min="0" value="${s.rescan_interval_s}" onchange="L.setting('rescan_interval_s', +this.value)">`)}
     ${row(st.paused ? "Lumen is paused" : "Lumen is running", st.paused ? "Your devices are back under their own control." : "Automations are reacting to events.", `<button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>`)}

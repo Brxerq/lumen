@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["screen-child"]:  # the screen-glow helper process (frozen builds spawn the exe itself)
         from lumen.devices.screen import run_child
         return run_child()
+    if argv[:1] == ["notch-child"]:  # the notch/status-pill helper process
+        from lumen.devices.notch import run_child
+        return run_child()
 
     for stream in (sys.stdout, sys.stderr):  # cp1252 consoles must never crash on a stray non-ASCII char
         reconfigure = getattr(stream, "reconfigure", None)

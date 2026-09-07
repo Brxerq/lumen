@@ -28,6 +28,26 @@ All notable changes to this project are documented here. The format follows [Kee
   device's menu used to open as an unreadable sliver.
 
 ### Added
+- **A notch-style status tab.** A new built-in device, `notch`, hangs a small
+  always-on-top tab from the top of the screen (under the menu bar and the
+  hardware notch on a MacBook) on Windows, macOS and
+  Linux. Like a keyboard it has zones, so the default "A tab on every zone"
+  rule lights one soft bar per open Claude or Codex tab in its status colour,
+  each bar filling up as that tab's context window does; hover it to see
+  every live session's agent, name or folder, context use and state. It hides
+  itself when no tab is open, and Settings → "Status tab at the top of the
+  screen" turns it off. Inspired by codenotch, without the Mac-only part.
+- **Context-window use per session.** The hook reads the last assistant turn
+  of the Claude Code transcript and records how many tokens the session holds
+  against its window (200k, or 1M for `[1m]` models). It travels with the
+  `agents.sessions` event, so devices and the dashboard can show it.
+
+### Fixed
+- **MacBook keyboard backlight not detected.** The adapter always talked to
+  keyboard id 1, which newer Apple Silicon Macs don't use, so the read-back
+  failed and the device was silently dropped. It now asks CoreBrightness for
+  the real id, and a failure to load the framework is written to the log
+  instead of swallowed.
 - **A volume for the sound.** The slider on each device row is a dimmer for a
   light and the volume for the speaker, 5% to 100%. It is rendered into the tone
   rather than set on a mixer: Windows' `winsound` has no volume control at all,

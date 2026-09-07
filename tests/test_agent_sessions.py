@@ -186,7 +186,7 @@ def test_agent_integration_emits_transitions(monkeypatch):
     assert [[s["status"] for s in e.data["sessions"]] for e in per_tab] == [[], [RUNNING], [INPUT], [DONE]]
     assert [e.data["status"] for e in per_tab] == [DONE, RUNNING, INPUT, DONE]
     assert per_tab[1].data["sessions"] == [{"id": "s1", "agent": "claude", "slot": 0, "label": "", "status": RUNNING,
-                                            "started": None, "ts": None, "cwd": ""}]
+                                            "started": None, "ts": None, "cwd": "", "context": None}]
     types = [(e.type, e.data.get("status")) for e in events if e.type != "agents.sessions"]
     # first poll settles the aggregate without a per-agent flash; then each change emits both
     assert types == [("agents.status", "done"),
@@ -222,3 +222,29 @@ def test_session_slots_are_sticky_across_agents(tmp_path):
     assert (r["started"], r["ts"], r["cwd"], r["status"]) == (10.0, 20.0, "C:/proj", DONE)
     assert ag.forget_session("s9", tmp_path) and not ag.forget_session("s9", tmp_path)
     assert ag.read_sessions(tmp_path, now=21.0) == {}
+
+
+def test_context_window_comes_from_the_transcripts_last_usage(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text("\n".join([
+        json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+        json.dumps({"type": "assistant", "message": {"model": "claude-fable-5-1", "usage": {
+            "input_tokens": 32, "cache_creation_input_tokens": 5288, "cache_read_input_tokens": 160898, "output_tokens": 9}}}),
+        "not json at all",
+        json.dumps({"type": "system", "usage": "the word, not the object"}),
+    ]) + "\n")
+    assert ag.context_usage(t) == {"tokens": 166218, "window": 200_000}
+    assert ag.context_percent({"context": ag.context_usage(t)}) == 83
+    assert ag.context_usage(tmp_path / "missing.jsonl") is None
+    assert ag.context_percent({}) is None and ag.context_percent({"context": {"tokens": "x"}}) is None
+    t.write_text(json.dumps({"message": {"model": "claude-opus-5[1m]", "usage": {"input_tokens": 400_000}}}) + "\n")
+    assert ag.context_usage(t) == {"tokens": 400_000, "window": 1_000_000}
+    # the hook records it, and a snapshot key moves only on a five-percent step
+    ev = {"hook_event_name": "UserPromptSubmit", "session_id": "ctx1", "transcript_path": str(t)}
+    ag.apply_hook(ev, tmp_path, now=1.0)
+    rec = json.loads((tmp_path / "ctx1.json").read_text())
+    assert rec["context"] == {"tokens": 400_000, "window": 1_000_000}
+    a = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 41, "window": 100}}])
+    b = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 44, "window": 100}}])
+    c = ag._key([{"id": "x", "agent": "claude", "slot": 0, "status": RUNNING, "context": {"tokens": 46, "window": 100}}])
+    assert a == b != c

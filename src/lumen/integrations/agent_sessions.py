@@ -121,8 +121,48 @@ def apply_hook(payload: dict, state_dir: Path | None = None, now: float | None =
         pass
     if payload.get("cwd"):
         record["cwd"] = str(payload["cwd"])
+    if payload.get("transcript_path"):
+        record["context"] = context_usage(Path(str(payload["transcript_path"])))
     path.write_text(json.dumps(record))
     return status
+
+
+CONTEXT_WINDOW = 200_000
+_USAGE_TAIL = 256 * 1024
+
+
+def context_usage(transcript: Path) -> dict | None:
+    """How full the session's context window is, from the last assistant turn
+    in a Claude Code transcript: {"tokens": n, "window": size}. None if the
+    transcript has no usage yet (or isn't Claude's)."""
+    try:
+        with transcript.open("rb") as f:
+            f.seek(max(0, transcript.stat().st_size - _USAGE_TAIL))
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for raw in reversed(lines):
+        if b'"usage"' not in raw:
+            continue
+        try:
+            message = json.loads(raw).get("message") or {}
+            usage = message.get("usage") or {}
+            tokens = int(usage.get("input_tokens", 0)) + int(usage.get("cache_creation_input_tokens", 0))                 + int(usage.get("cache_read_input_tokens", 0))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        if tokens <= 0:
+            continue
+        window = 1_000_000 if "[1m]" in str(message.get("model", "")) else CONTEXT_WINDOW
+        return {"tokens": tokens, "window": window}
+    return None
+
+
+def context_percent(session: dict) -> int | None:
+    ctx = session.get("context") or {}
+    try:
+        return max(0, min(100, round(100 * int(ctx["tokens"]) / int(ctx["window"]))))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 def run_hook() -> int:
@@ -352,15 +392,18 @@ def _update_sessions(agent: str, statuses: dict[str, str], records: dict[str, di
             if sid not in _sessions:
                 continue
             r = records.get(sid, {})
-            _sessions[sid].update(status=status, started=r.get("started"), ts=r.get("ts"), cwd=r.get("cwd", ""))
+            _sessions[sid].update(status=status, started=r.get("started"), ts=r.get("ts"), cwd=r.get("cwd", ""),
+                                  context=r.get("context"))
         before = _key(_snapshot)
         snapshot = _rebuild()
         return snapshot if _key(snapshot) != before else None
 
 
 def _key(snapshot: list[dict]) -> list[tuple]:
-    """What counts as a change worth an event — timestamps alone do not."""
-    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", "")) for s in snapshot]
+    """What counts as a change worth an event — timestamps alone do not, a
+    context window that moved by another five percent does."""
+    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", ""), (context_percent(s) or 0) // 5)
+            for s in snapshot]
 
 
 def _rebuild() -> list[dict]:

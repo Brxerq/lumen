@@ -18,7 +18,7 @@ import sys
 from lumen.core.devices import BRIGHTNESS, Device
 
 FRAMEWORK = "/System/Library/PrivateFrameworks/CoreBrightness.framework"
-KEYBOARD = 1  # the built-in keyboard; external ones are not addressed by this client
+KEYBOARD = 1  # the built-in keyboard on most Macs; keyboard_id() asks the client for the real one
 
 
 def client():
@@ -27,6 +27,18 @@ def client():
     ns: dict = {}
     objc.loadBundle("CoreBrightness", ns, bundle_path=FRAMEWORK)
     return ns["KeyboardBrightnessClient"].alloc().init()
+
+
+def keyboard_id(client) -> int:
+    """The id of the first backlit keyboard the client knows, or KEYBOARD.
+
+    Recent Apple Silicon Macs don't always number the built-in keyboard 1;
+    talking to id 1 there reads back nothing and the device vanished."""
+    try:
+        ids = [int(i) for i in (client.copyKeyboardBackgroundIDs() or [])]
+    except Exception:
+        ids = []
+    return ids[0] if ids else KEYBOARD
 
 
 class KeyboardBacklight(Device):
@@ -55,8 +67,10 @@ def discover() -> list[Device]:
     if sys.platform != "darwin":
         return []
     try:
-        device = KeyboardBacklight(client())
-    except Exception:  # no pyobjc, or a Mac whose CoreBrightness lacks the client
+        c = client()
+        device = KeyboardBacklight(c, keyboard_id(c))
+    except Exception as e:  # no pyobjc, or a Mac whose CoreBrightness lacks the client
+        print(f"mac_backlight: CoreBrightness unavailable: {type(e).__name__}: {e}", flush=True)
         return []
     # A Mac with no backlight (a desktop, or an external keyboard only) answers
     # with nothing readable — don't offer a device that cannot light up.
