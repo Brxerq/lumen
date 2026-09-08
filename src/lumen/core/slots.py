@@ -70,7 +70,9 @@ def pinned(session_id: str, cwd: str = "", home: Path | None = None) -> dict:
     pins = load(home)
     for key in keys_for(session_id, cwd):
         if key in pins:
-            return dict(pins[key])
+            # Dismissal belongs to an exact task, never every future task in its project.
+            return {field: value for field, value in pins[key].items()
+                    if field != "dismissed_status" or key.startswith("id:")}
     return {}
 
 

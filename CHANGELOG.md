@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.7] — 2026-09-08
+
+### Added
+- Force sync refreshes agent records and device output, with progress and failure feedback.
+
+### Changed
+- Device preview appears first and expanded on the dashboard; other sections start collapsed.
+- Running tasks appear first in the dashboard and notch, with clearer typography and smoked glass dashboard surfaces.
+
+### Fixed
+- Recover quiet Codex tasks after restart and retry recovery after temporary database failures.
+  Discovery of unknown tasks is limited to the past 24 hours to avoid reviving abandoned history;
+  known and hooked tasks remain tracked without an age limit.
+- Completed and archived records override stale running hooks; unavailable tracking preserves the last snapshot.
+- Idle Claude tabs no longer take device zones, and dismissing one task does not hide other tasks in its project.
+- Refresh notch details every half-second even when device colors stay unchanged.
+- Preserve dashboard disclosure choices and report force-sync results correctly during overlapping live updates.
+
 ## [0.7.6] — 2026-09-08
 
 ### Changed

@@ -445,3 +445,95 @@ def test_snapshot_carries_activity_and_cost_and_the_key_steps_by_the_dollar():
                                                                "tokens": {"out": 101_000}}}) is None
     assert ag._update_sessions("claude", {"a": RUNNING}, {"a": {**rec, "activity": "Editing api.py",
                                                                "tokens": {"out": 120_000}}})  # $9 -> a step
+
+
+def test_codex_recovery_finds_quiet_running_tasks_after_restart(tmp_path):
+    db = tmp_path / 'state.sqlite'
+    now = time.time()
+    with sqlite3.connect(db) as conn:
+        conn.execute('create table threads (id text, rollout_path text, archived int, updated_at_ms int)')
+        for tid, boundary, age in [('running', 'task_started', 7200), ('finished', 'task_complete', 7200),
+                                   ('ancient', 'task_started', 30 * 24 * 3600)]:
+            rollout = tmp_path / f'{tid}.jsonl'
+            rollout.write_text(json.dumps({'type': 'event_msg', 'payload': {'type': boundary}}) + '\n')
+            conn.execute('insert into threads values (?, ?, 0, ?)', (tid, str(rollout), int((now - age) * 1000)))
+    assert codex.rollout_states(db, now=now, recover=True) == {'running': True}
+    assert codex.rollout_states(db, now=now, recover=True, hooked=['ancient']) == {'running': True, 'ancient': True}
+    assert codex.rollout_states(db, now=now, hooked=['ancient']) == {'ancient': True}
+
+
+def test_terminal_rollout_timestamp_overrides_stale_hook(tmp_path):
+    db = tmp_path / 'state.sqlite'
+    rollout = tmp_path / 'task.jsonl'
+    now = time.time()
+    rollout.write_text(json.dumps({'type': 'event_msg', 'payload': {'type': 'task_complete'}}) + '\n')
+    os.utime(rollout, (now, now))
+    with sqlite3.connect(db) as conn:
+        conn.execute('create table threads (id text, rollout_path text, archived int, updated_at_ms int)')
+        conn.execute('insert into threads values (?, ?, 0, ?)', ('task', str(rollout), int((now - 60) * 1000)))
+    metadata = {}
+    truth = codex.rollout_states(db, now=now, metadata=metadata)
+    assert ag.session_statuses({'task': RUNNING}, truth, {'task': {'ts': now - 30}}, metadata) == {'task': DONE}
+
+
+def test_unknown_truth_timestamp_does_not_override_completion():
+    assert ag.session_statuses({'task': RUNNING}, {'task': False}, {'task': {'ts': time.time()}}) == {'task': DONE}
+
+
+def test_force_sync_repaints_and_reports_failed_tracking(monkeypatch):
+    import pytest
+    monkeypatch.setattr(ag, '_sessions', {})
+    monkeypatch.setattr(ag, '_snapshot', [])
+    monkeypatch.setattr(ag, '_dismissed', {})
+    events = []
+    integ = ag.AgentIntegration(events.append, {})
+    integ.agent = 'codex'
+    integ.truth = lambda hooked: {'task': True}
+    integ._poll()
+    events.clear()
+    integ.sync()
+    assert [e.type for e in events] == ['agents.sessions']
+    def unavailable(hooked):
+        raise OSError('locked tracker')
+    integ.truth = unavailable
+    with pytest.raises(RuntimeError, match='unavailable'):
+        integ.sync()
+    assert integ.sessions[0]['status'] == RUNNING
+    assert integ.sessions[0]['tracking_health'] == 'unavailable'
+
+
+def test_claude_metadata_does_not_seat_idle_desktop_tabs(monkeypatch):
+    monkeypatch.setattr(ag, '_sessions', {})
+    monkeypatch.setattr(ag, '_snapshot', [])
+    monkeypatch.setattr(ag, '_dismissed', {})
+    def states(metadata):
+        metadata.update({'idle': {'cwd': '/project', 'ts': 1}, 'busy': {'cwd': '/project', 'ts': 2}})
+        return {'idle': False, 'busy': True}
+    monkeypatch.setattr(claude_code, 'transcript_states', states)
+    integ = claude_code.ClaudeCode(lambda e: None, {})
+    integ._poll()
+    assert [s['id'] for s in integ.sessions] == ['busy']
+
+
+def test_dismissal_does_not_hide_other_tasks_in_the_same_project():
+    ag.slots.remember('dismissed', '/project', slot=2, dismissed_status=RUNNING)
+    assert ag.slots.pinned('dismissed', '/project')['dismissed_status'] == RUNNING
+    assert ag.slots.pinned('new-task', '/project').get('dismissed_status') is None
+    assert ag.slots.pinned('new-task', '/project')['slot'] == 2
+
+
+def test_codex_retries_startup_recovery_after_tracking_failure(monkeypatch):
+    monkeypatch.setattr(ag, '_sessions', {})
+    monkeypatch.setattr(ag, '_snapshot', [])
+    calls = []
+    def states(**kwargs):
+        calls.append(kwargs['recover'])
+        if len(calls) == 1:
+            raise codex.TrackingUnavailable('locked')
+        return {'quiet': True}
+    monkeypatch.setattr(codex, 'rollout_states', states)
+    integ = codex.Codex(lambda e: None, {})
+    integ._poll()
+    integ._poll()
+    assert calls == [True, True]
+    assert integ.sessions[0]['status'] == RUNNING

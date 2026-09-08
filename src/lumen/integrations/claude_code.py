@@ -64,7 +64,7 @@ def _opens_turn(entry: dict) -> bool:
     return not isinstance(origin, dict) or origin.get("kind") == "human"
 
 
-def transcript_states(home: Path = CLAUDE_HOME) -> dict[str, bool]:
+def transcript_states(home: Path = CLAUDE_HOME, metadata: dict[str, dict] | None = None) -> dict[str, bool]:
     """session_id -> turn open, for every live claude process with a transcript.
     No freshness cutoff: an idle transcript must keep overriding a stuck hook
     file however old it gets."""
@@ -79,6 +79,9 @@ def transcript_states(home: Path = CLAUDE_HOME) -> dict[str, bool]:
             continue
         if transcript.exists() and psutil.pid_exists(session.get("pid", -1)):
             out[session["sessionId"]] = turn_open(transcript)
+            if metadata is not None:
+                metadata[session["sessionId"]] = {"cwd": session["cwd"], "ts": transcript.stat().st_mtime,
+                                                 "tracking_health": "ok"}
     return out
 
 
@@ -96,7 +99,11 @@ class ClaudeCode(AgentIntegration):
             "but cannot see permission prompts.")
 
     def truth(self, hooked: dict[str, str]) -> dict[str, bool]:
-        return transcript_states()
+        records: dict[str, dict] = {}
+        states = transcript_states(metadata=records)
+        # Idle desktop tabs must not acquire zones just because metadata exists.
+        self._fallback_records = {sid: record for sid, record in records.items() if states[sid] or sid in hooked}
+        return states
 
     def start(self) -> None:
         super().start()

@@ -63,6 +63,22 @@ def test_notch_only_advertises_focus_for_claude(monkeypatch):
     assert focus_session({"id": "codex", "agent": "codex"}) is False
 
 
+def test_notch_prioritizes_running_rows_and_keeps_click_targets_aligned():
+    from lumen.devices.notch import session_rows, visible_sessions
+
+    sessions = [
+        {"id": "idle", "agent": "codex", "title": "Idle", "slot": 0, "status": "done"},
+        {"id": "waiting", "agent": "claude", "title": "Waiting", "slot": 1, "status": "input"},
+        {"id": "busy", "agent": "codex", "title": "Busy", "slot": 7, "status": "running"},
+    ]
+    visible = visible_sessions(sessions, {})
+    assert [s["id"] for s in visible] == ["busy", "waiting", "idle"]
+    assert [r[1] for r in session_rows(visible)] == ["Busy", "Waiting", "Idle"]
+    assert [s["id"] for s in visible_sessions(sessions, {"agents": "codex"})] == ["busy", "idle"]
+    assert [r[1] for r in session_rows(sessions, prioritize=False)] == ["Idle", "Waiting", "Busy"]
+    assert sessions[0]["id"] == "idle"
+
+
 def test_settings_accept_the_new_notch_knobs():
     import pytest
 

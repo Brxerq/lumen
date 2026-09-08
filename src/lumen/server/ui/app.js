@@ -1,7 +1,7 @@
 /* Lumen dashboard — vanilla JS, no build step. Talks to the local JSON API. */
 "use strict";
 
-const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, request: 0, pendingRender: false };
+const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, request: 0, pendingRender: false, sync: { busy: false, message: "", error: false } };
 const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 255, 0] };
 const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
@@ -98,18 +98,23 @@ async function refresh() {
   }
   // Streams and the fallback poll can overlap. An older response must never
   // replace state that a newer response already displayed.
-  if (request !== S.request) return;
+  if (request !== S.request) return { superseded: true, error };
   S.state = state;
   S.error = error;
+  if (S.sync.waiting) {
+    S.sync = { busy: false, waiting: false, error: !!error, message: error ? "Sync finished, but the dashboard could not refresh. Try again." : "Sessions and devices are up to date." };
+    S.sig = null;
+  }
   // Re-render only when something visible changed, and never while a menu is open
   // (a rebuild would close it under the cursor). The sidebar clock updates regardless.
   const st = S.state;
   const sig = st && JSON.stringify([S.page, S.feed, st.devices, st.integrations, st.rules, st.presets, st.activity, st.messages, st.paused, st.scanning, st.settings, st.onboarded, st.sessions, st.forgotten_devices, st.quiet_now, S.error]);
-  if (sig === S.sig) { S.quiet++; renderSidebar(); return; }
-  if (refreshBlocked()) { S.pendingRender = true; S.quiet++; renderSidebar(); return; }
+  if (sig === S.sig) { S.quiet++; renderSidebar(); return { error }; }
+  if (refreshBlocked()) { S.pendingRender = true; S.quiet++; renderSidebar(); return { error }; }
   S.quiet = 0;
   S.sig = sig;
   render();
+  return { error };
 }
 function refreshBlocked() {
   const active = document.activeElement;
@@ -157,10 +162,10 @@ function render() {
   if (!st) { $("#main").innerHTML = `<div class="card" style="margin-top:60px"><div class="empty"><b>Can't reach Lumen</b>The background app doesn't seem to be running. Open the Lumen app, or run <span class="mono">lumen</span>.<br><span class="mono dim">${h(S.error || "")}</span></div></div>`; return; }
   if (document.activeElement && $("#main").contains(document.activeElement) && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   const pages = { dashboard: renderDashboard, devices: renderDevices, automations: renderAutomations, integrations: renderIntegrations, effects: renderEffects, settings: renderSettings };
-  const openPanels = [...document.querySelectorAll("#main details[id][open]")].map(el => el.id);
+  const panels = [...document.querySelectorAll("#main details[id]")].map(el => ({ id: el.id, open: el.open }));
   const focusedPanel = document.activeElement?.tagName === "SUMMARY" ? document.activeElement.parentElement.id : null;
   $("#main").innerHTML = (pages[S.page] || renderDashboard)(st);
-  openPanels.forEach(id => { const el = document.getElementById(id); if (el) el.open = true; });
+  panels.forEach(({ id, open }) => { const el = document.getElementById(id); if (el) el.open = open; });
   if (focusedPanel) document.getElementById(focusedPanel)?.querySelector("summary")?.focus({ preventScroll: true });
   if (!st.onboarded && !S.wizard && !$("#modal-root").children.length) openWizard();
 }
@@ -199,9 +204,13 @@ function renderDashboard(st) {
     : "Lumen is listening. Your agents’ progress will appear below.";
 
   return `
+  <div class="dashboard-view">
   <div class="page-head dashboard-head"><div><h1>Overview</h1><p>Your agents, at a glance.</p></div>
-    <a class="btn" href="#integrations">Connect an agent <span aria-hidden="true">↗</span></a></div>
+    <div class="page-actions"><button class="btn primary" onclick="L.forceSync()" ${S.sync.busy ? 'disabled aria-busy="true"' : 'aria-busy="false"'}>${S.sync.busy ? "Syncing…" : "Force sync"}</button><a class="btn" href="#integrations">Connect an agent <span aria-hidden="true">↗</span></a></div></div>
+  <p class="sync-status${S.sync.error ? " sync-error" : ""}" role="status" aria-live="polite">${h(S.sync.message)}</p>
+  <details class="disclosure" id="dashboard-lights" open><summary><span>Device preview<small>${busy ? `${busy} ${busy === 1 ? "session" : "sessions"} running · ` : ""}See your lights and adjust their layout</small></span></summary><div class="disclosure-body">${st.devices.length ? liveBoard(st) + deviceStrip(st) : `<p class="muted">No devices connected yet. <a class="more" href="#devices">Find devices →</a></p>`}</div></details>
 
+  <details class="disclosure" id="dashboard-status"><summary><span>Workspace status<small>${h(headline)}</small></span></summary><div class="disclosure-body">
   <section class="card section overview" aria-label="Workspace status"><div class="hero ${tone}">
     <div class="hero-orb" aria-hidden="true"><i></i></div>
     <div class="hero-text"><b>${h(headline)}</b><span>${h(sub)}</span></div>
@@ -213,9 +222,8 @@ function renderDashboard(st) {
   </section>
   <div class="overview-links"><a href="#devices"><span class="dot ${on.length ? "on" : ""}" aria-hidden="true"></span>${on.length} devices connected <span aria-hidden="true">↗</span></a><a href="#automations">${rules.length} automations enabled <span aria-hidden="true">↗</span></a></div>
   ${st.quiet_now ? `<div class="dashboard-notice"><span class="dot warn" aria-hidden="true"></span><span>Quiet hours are active. Some effects may be muted.</span><a href="#settings">Manage quiet hours →</a></div>` : ""}
-
-  ${sessionList(st)}
-  <details class="disclosure" id="dashboard-lights"><summary><span>Device preview<small>See your lights and adjust their layout</small></span></summary><div class="disclosure-body">${st.devices.length ? liveBoard(st) + deviceStrip(st) : `<p class="muted">No devices connected yet. <a class="more" href="#devices">Find devices →</a></p>`}</div></details>
+  </div></details>
+  <details class="disclosure" id="dashboard-sessions"><summary><span>Agent sessions<small>${busy} running · ${needs} need input · ${sess.length} tracked</small></span></summary><div class="disclosure-body">${sessionList(st)}</div></details>
 
       <details class="disclosure" id="dashboard-activity"><summary><span>Recent activity<small>Events from your agents and automations</small></span></summary><div class="disclosure-body"><div class="section-head">
         <span class="spacer"></span>
@@ -227,7 +235,8 @@ function renderDashboard(st) {
             : `<div class="empty"><b>${st.activity.length ? "Nothing here" : "Nothing yet"}</b>${st.activity.length ? "No recent events match this filter." : "Events from your agents, builds and scripts show up here."}</div>`}</div>`;
         })()}
       </div></details>
-      ${st.messages.length ? `<div class="section"><div class="section-head"><h2>Notes</h2></div><div class="card"><div class="feed">${st.messages.map(m => `<div class="feed-item"><span class="feed-time">${clock(m.ts)}</span><span class="feed-body small muted">${h(m.text)}</span></div>`).join("")}</div></div></div>` : ""}
+      ${st.messages.length ? `<details class="disclosure" id="dashboard-notes"><summary><span>Notes<small>${st.messages.length} messages from Lumen</small></span></summary><div class="disclosure-body"><div class="feed">${st.messages.map(m => `<div class="feed-item"><span class="feed-time">${clock(m.ts)}</span><span class="feed-body small muted">${h(m.text)}</span></div>`).join("")}</div></div></details>` : ""}
+  </div>
   `;
 }
 
@@ -369,8 +378,8 @@ function liveBoard(st) {
     </div></div></div>`;
 }
 
-// Tabs are listed in zone order and can be dragged into the order you think in
-// ("zone 1 is the API refactor"). The colour on the slot number is the colour
+// Running tabs come first; slot numbers and reorder controls retain hardware
+// order ("zone 1 is the API refactor"). The colour on the slot number is the colour
 // that zone is actually showing, so you can see what you are moving. Tabs past
 // the last zone are listed too, under the reason they are dark: a tab that
 // silently reaches no hardware is what makes this page feel broken.
@@ -378,7 +387,6 @@ function sessionList(st) {
   const sess = st.sessions;
   const { zones, agentOf, placed: onZoneIds, foldedIds } = zoneLayout(st);
   const onHardware = new Set([...onZoneIds, ...foldedIds.keys()]);
-  const onZone = sess.filter(s => onZoneIds.has(s.id));
   const foldedTabs = sess.filter(s => foldedIds.has(s.id));
   const offZone = sess.filter(s => !onHardware.has(s.id));
   // Only zones a homeless tab could actually land on: a keyboard filtered to
@@ -405,32 +413,34 @@ function sessionList(st) {
     const sharing = foldedIds.get(s.id);
     return `<div class="row session${placed || sharing ? "" : " off-zone"}" draggable="true" data-sid="${h(s.id)}" role="listitem"
       ondragstart="L.dragStart(event,'${js(s.id)}')" ondragover="L.dragOver(event)" ondrop="L.drop(event,'${js(s.id)}')" ondragend="L.dragEnd()">
-      <span class="grip" aria-hidden="true" title="Drag to reorder">⠿</span>
+      <span class="grip" aria-hidden="true" title="Drag to arrange device slots; running sessions stay first in this list">⠿</span>
       <span class="slot ${placed || sharing ? h(s.status) : "unplaced"}" title="${placed ? `Tab ${i + 1}, left to right on your devices`
       : sharing ? `Shown on ${deviceById(sharing)?.name || sharing}, in one colour with the other tabs` : `Tab ${i + 1}. Every zone is taken by a tab further up`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${i + 1}</span>
       <div class="row-main">
         <div class="row-title"><input class="name-edit" value="${h(editName)}" placeholder="${h(name)}" aria-label="Name for this tab"
           title="Rename this tab" onchange="L.labelSession('${js(s.id)}', this.value)"></div>
         <div class="row-sub">${h(s.agent)} · ${s.started ? "open for " + ago(s.started) : "tracked from the agent's own record"}${s.ts ? " · updated " + ago(s.ts) + " ago" : ""}</div>
-        ${s.cwd ? `<div class="row-sub tech" title="${h(s.cwd)}">${h(shortPath(s.cwd))}</div>` : ""}</div>
+        ${s.cwd ? `<div class="row-sub tech" title="${h(s.cwd)}">${h(shortPath(s.cwd))}</div>` : ""}
+        ${sharing ? `<div class="row-sub">Shares ${h(deviceById(sharing)?.name || sharing)}</div>` : !placed ? `<div class="row-sub">Not assigned to a device zone</div>` : ""}</div>
       <div class="row-actions"><span class="pill ${h(s.status)}">${STATUS_LABEL[s.status] || h(s.status)}</span>
-        <button class="btn sm ghost icon" aria-label="Move ${h(name)} earlier" title="Move earlier" ${i ? "" : "disabled"} onclick="L.moveSession('${js(s.id)}', -1)">▲</button>
-        <button class="btn sm ghost icon" aria-label="Move ${h(name)} later" title="Move later" ${i === sess.length - 1 ? "disabled" : ""} onclick="L.moveSession('${js(s.id)}', 1)">▼</button>
+        <button class="btn sm ghost icon" aria-label="Move ${h(name)} to an earlier device slot" title="Move to an earlier device slot" ${i ? "" : "disabled"} onclick="L.moveSession('${js(s.id)}', -1)">▲</button>
+        <button class="btn sm ghost icon" aria-label="Move ${h(name)} to a later device slot" title="Move to a later device slot" ${i === sess.length - 1 ? "disabled" : ""} onclick="L.moveSession('${js(s.id)}', 1)">▼</button>
         <button class="btn sm ghost icon" aria-label="Forget ${h(name)}" title="Forget this tab. It comes back if the tab is still open." onclick="L.forget('${js(s.id)}')">✕</button></div></div>`;
   };
-  const group = list => `<div class="rows" role="list">${list.map(row).join("")}</div>`;
+  const priority = { running: 0, input: 1, done: 2 };
+  const group = list => `<div class="rows" role="list">${[...list].sort((a, b) => (priority[a.status] ?? 3) - (priority[b.status] ?? 3)).map(row).join("")}</div>`;
   return `<div class="section"><div class="section-head"><h2>Open agent tabs</h2><span class="count">${sess.length}</span>${sess.length > 1
-    ? `<span class="spacer"></span><span class="more dim">drag to reorder</span>` : ""}</div>
-    <div class="card">${sess.length ? `${group(onZone)}${foldedTabs.length ? `<div class="rows-note">${(() => {
+    ? `<span class="spacer"></span><span class="more dim">Running first · drag to arrange device slots</span>` : ""}</div>
+    <div class="card">${sess.length ? `${group(sess)}${foldedTabs.length ? `<div class="rows-note">${(() => {
       const dev = deviceById([...foldedIds.values()][0]);
-      return `<b>${foldedTabs.length === 1 ? "This tab shares" : `These ${foldedTabs.length} tabs share`} ${dev ? h(dev.name) : "one device"}.</b>
+      return `<b>${foldedTabs.length === 1 ? "One tab shares" : `${foldedTabs.length} tabs share`} ${dev ? h(dev.name) : "one device"}.</b>
       It shows a single colour for all of them, so there is nothing to arrange here.${dev && dev.zones > 1
         ? ` Switch it to one zone per tab on the <a href="#devices">Devices page</a> to give each its own colour.`
         : ` It has one zone, so it can only ever show the busiest of them.`}`;
-    })()}</div>${group(foldedTabs)}` : ""}${offZone.length ? `<div class="rows-note">${seats ? `<b>${offZone.length} more ${offZone.length === 1 ? "tab is" : "tabs are"} open with no zone left.</b>
-      Your devices cover ${seats} ${seats === 1 ? "zone" : "zones"}, and the tabs above have taken all of them. Drag one of these up to swap it in, or close the tabs you are done with.`
-      : `<b>No automation puts these tabs on a device.</b>
-      They are still tracked, but nothing lights up per tab until an automation shows agent status on a device with more than one zone. <a href="#automations">Set one up →</a>`}</div>${group(offZone)}` : ""}`
+    })()}</div>` : ""}${offZone.length ? `<div class="rows-note">${seats ? `<b>${offZone.length} ${offZone.length === 1 ? "tab has" : "tabs have"} no zone left.</b>
+      Your devices cover ${seats} ${seats === 1 ? "zone" : "zones"}. Move an unassigned tab to an earlier device slot, or close the tabs you are done with.`
+      : `<b>${offZone.length} ${offZone.length === 1 ? "tab has" : "tabs have"} no device assignment.</b>
+      They are still tracked, but nothing lights up per tab until an automation shows agent status on a device with more than one zone. <a href="#automations">Set one up →</a>`}</div>` : ""}`
       : `<div class="empty"><b>Your next session starts here</b>Open Claude Code or Codex to see its progress.<br><a class="btn mt" href="#integrations" style="display:inline-flex">Set up an agent</a></div>`}</div></div>`;
 }
 
@@ -869,6 +879,21 @@ function renderWizard() {
 
 // ---------- actions (window.L) ----------
 const L = window.L = {
+  async forceSync() {
+    if (S.sync.busy) return;
+    S.sync = { busy: true, message: "Reading agent sessions and updating your devices…", error: false };
+    render();
+    try {
+      await api("POST", "/api/sync");
+      const result = await refresh();
+      if (result.error) throw new Error("Sync finished, but the dashboard could not refresh");
+      S.sync = { busy: false, waiting: !!result.superseded, message: result.superseded ? "Sync completed. Waiting for the latest dashboard update…" : "Sessions and devices are up to date.", error: false };
+    } catch (e) {
+      S.sync = { busy: false, message: `Could not sync: ${e.message}. Try again.`, error: true };
+    } finally {
+      render();
+    }
+  },
   b: () => S.bench,
   // The menu is positioned in viewport coordinates rather than inside its row:
   // it has to escape the card, the modal and the wizard's row list, all of which

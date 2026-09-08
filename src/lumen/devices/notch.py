@@ -91,6 +91,8 @@ class Notch(ScreenGlow):
         self.id, self.name, self.vendor = "notch", "Notch status tab", ""
         self.capabilities = frozenset({COLOR, ZONES})
         self.zone_count = ZONE_COUNT
+        # Session metadata, usage and display options can change without new colors.
+        self.refresh_every_s = 0.5
         self.ambient = True  # its whole purpose is the persistent sessions view
         self.details = {"connection": "built-in", "zones": ZONE_COUNT}
         self.position, self.hide_fullscreen = "top", True
@@ -247,13 +249,15 @@ def runs(zones: list[RGB]) -> list[tuple[RGB, int]]:
     return [(c, w) for c, w in out if c != (0, 0, 0)]
 
 
-def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None, str, float | None]]:
-    """(agent, name, status, context %, activity, cost) per live session in zone
-    order — the daemon's snapshot, so the rows match the bars and a tab's label
-    is its name. `activity` ("Editing api.py") and `cost` (USD) are optional
-    snapshot fields; "" / None when the daemon doesn't know them."""
+def _session_order(session: dict) -> tuple[int, int]:
+    return ({"running": 0, "input": 1, "done": 2}.get(str(session.get("status")), 3),
+            int(session.get("slot", 0)))
+
+
+def session_rows(sessions: list[dict], *, prioritize: bool = True) -> list[tuple[str, str, str, int | None, str, float | None]]:
+    """Rows prioritize running tasks; bar metadata can request physical slot order."""
     from lumen.integrations.agent_sessions import context_percent
-    rows = sorted(sessions, key=lambda s: int(s.get("slot", 0)))
+    rows = sorted(sessions, key=_session_order if prioritize else lambda s: int(s.get("slot", 0)))
     out = []
     for s in rows:
         cost = s.get("cost_usd")
@@ -271,7 +275,7 @@ def visible_sessions(sessions: list[dict], options: dict) -> list[dict]:
     if not bool(show.get("sessions", True)):
         return []
     agent = str(options.get("agents") or "all")
-    return [s for s in sorted(sessions, key=lambda s: int(s.get("slot", 0)))
+    return [s for s in sorted(sessions, key=_session_order)
             if agent == "all" or s.get("agent") == agent]
 
 
@@ -735,12 +739,13 @@ def run_child() -> int:
         flags = {**SHOW_DEFAULTS, **(opts.get("show") if isinstance(opts.get("show"), dict) else {})}
         shown_sessions = visible_sessions(state["sessions"], opts)
         rows = apply_show(session_rows(shown_sessions), flags)
+        bar_rows = apply_show(session_rows(shown_sessions, prioritize=False), flags)
         usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"))
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
-        fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
+        fills = [r[3] for r in bar_rows] if len(bar_rows) == len(runs(zones)) else None
         left = state["pulse_until"] - time.time()
         gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
-        accents = bar_accents(rows, flags.get("accent", True)) if fills is not None else None
+        accents = bar_accents(bar_rows, flags.get("accent", True)) if fills is not None else None
         show(render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
                     flip=position() == "bottom", glow_gain=gain, size=size(),
                     rounded=state["hover"] and position() in VERTICAL, accents=accents))

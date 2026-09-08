@@ -457,7 +457,8 @@ def session_statuses(hooked: dict[str, str], truth: dict[str, bool], records: di
             truth_ts = truth_records.get(sid, {}).get("ts") or 0
             # A prompt hook may arrive before Codex appends a fresh task_started
             # record. Do not let an older terminal boundary finish that new turn.
-            newer_hook = hook_status in (RUNNING, INPUT) and hook_ts > truth_ts
+            newer_hook = (hook_status in (RUNNING, INPUT) and truth_ts > 0 and hook_ts > truth_ts
+                          and not truth_records.get(sid, {}).get("archived"))
             out[sid] = (INPUT if hook_status == INPUT else RUNNING) if truth[sid] or newer_hook else DONE
         else:
             out[sid] = hooked[sid]
@@ -636,6 +637,8 @@ class AgentIntegration(Integration):
         super().__init__(emit, options)
         self._stop = threading.Event()
         self._status: str | None = None
+        self._poll_lock = threading.Lock()
+        self._force_sync = False
 
     def truth(self, hooked: dict[str, str]) -> dict[str, bool]:
         """session_id -> turn open, from the agent's own files. Override."""
@@ -657,7 +660,7 @@ class AgentIntegration(Integration):
             truth = {s["id"]: s["status"] in (RUNNING, INPUT) for s in self.sessions}
             self._tracking_health = "unavailable"
             for s in self.sessions:
-                self._records.setdefault(s["id"], {"tracking_health": "unavailable"})
+                self._records[s["id"]] = {**s, **self._records.get(s["id"], {}), "tracking_health": "unavailable"}
         statuses = prune_gone(session_statuses(hooked, truth, self._records, getattr(self, "_fallback_records", {})),
                               truth, self._records)
         dismissal_updates: list[tuple[str, str, str | None]] = []
@@ -714,12 +717,27 @@ class AgentIntegration(Integration):
             self._stop.wait(self.poll_interval_s)
 
     def _poll(self) -> None:
+        with self._poll_lock:
+            self._reconcile()
+
+    def sync(self) -> None:
+        """Reconcile immediately and repaint devices, serialized with background polling."""
+        with self._poll_lock:
+            self._force_sync = True
+            try:
+                self._reconcile()
+                if getattr(self, "_tracking_health", "ok") != "ok":
+                    raise RuntimeError(f"{self.agent} session tracking unavailable")
+            finally:
+                self._force_sync = False
+
+    def _reconcile(self) -> None:
         statuses = self.current_sessions()
         first = self._status is None
         before = {s["id"]: s["status"] for s in self.sessions}
         self._poll_status(aggregate(statuses.values()))
         snapshot = _update_sessions(self.agent, statuses, getattr(self, "_records", {}))
-        if first and snapshot is None:
+        if (first or self._force_sync) and snapshot is None:
             snapshot = all_sessions()  # nothing open yet: still settle the zones (idle color) at startup
         if snapshot is not None:  # after agents.status, so per-zone rules win on the same device
             if not first:

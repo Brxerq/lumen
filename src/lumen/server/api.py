@@ -14,6 +14,7 @@ Bound to 127.0.0.1 only. Standard library, no framework.
     POST /api/integrations/<id>/connect | /disconnect · PATCH /api/integrations/<id> {options}
     POST /api/onboarded
     DELETE /api/sessions/<id>                forget a stale agent session file
+    POST /api/sync                          reconcile agent sessions and repaint devices
     GET  /api/update                         compare the running version with the latest GitHub release
     POST /api/update                         download it and restart (frozen builds only)
     GET  /api/stream                         server-sent events: one line whenever the state changes
@@ -127,6 +128,26 @@ class _Handler(BaseHTTPRequestHandler):
         self.engine.emit("agents.sessions",
                          {"status": aggregate(s["status"] for s in sessions), "sessions": sessions},
                          source="dashboard")
+
+    def _sync_sessions(self) -> None:
+        """Reconcile local agent records and restore the current device output."""
+        from lumen.integrations.agent_sessions import AgentIntegration
+
+        synced, failed = [], []
+        for integration in self.engine.integrations:
+            if not isinstance(integration, AgentIntegration):
+                continue
+            try:
+                integration.sync()
+                synced.append(integration.id)
+            except Exception as exc:
+                failed.append(integration.name)
+                self.engine._log(f"sync {integration.id} failed: {type(exc).__name__}: {exc}")
+        self.engine.player.repaint()
+        payload = {"synced": synced, "sessions": self.engine.state()["sessions"]}
+        if failed:
+            payload["error"] = "Could not sync " + ", ".join(failed) + ". Check Integrations and try again."
+        return self._json(503 if failed else 200, payload)
 
     def _body(self) -> dict | list | None:
         """The request body as parsed JSON, or None if it was rejected and the
@@ -271,6 +292,8 @@ class _Handler(BaseHTTPRequestHandler):
         e = self.engine
         try:
             match (method, *parts):
+                case ("POST", "api", "sync"):
+                    return self._sync_sessions()
                 case ("POST", "api", "scan"):
                     e.scan()
                     return self._json(200, {"devices": [d.to_dict() for d in e.devices]})

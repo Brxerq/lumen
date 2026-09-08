@@ -21,6 +21,19 @@ vm.runInContext(`
   assert.match(renderDashboard(sample), /Showing the last received state/);
   S.error = null;
   assert.match(renderDashboard(sample), /<details[^>]+id="dashboard-activity"/);
+  const dashboard = renderDashboard(sample);
+  assert.match(dashboard, /<details[^>]+id="dashboard-lights"[^>]* open/);
+  assert.equal(dashboard.match(/<details[^>]+id="([^"]+)"/)[1], 'dashboard-lights');
+  for (const id of ['dashboard-status', 'dashboard-sessions', 'dashboard-activity']) {
+    assert.match(dashboard, new RegExp('<details[^>]+id="' + id + '"[^>]*>'));
+    assert.doesNotMatch(dashboard, new RegExp('<details[^>]+id="' + id + '"[^>]* open'));
+  }
+  assert.ok(dashboard.includes('onclick="L.forceSync()"'));
+  S.sync = { busy: true, message: '', error: false };
+  assert.match(renderDashboard(sample), /disabled aria-busy="true">Syncing/);
+  S.sync = { busy: false, message: 'Could not sync. Try again.', error: true };
+  assert.match(renderDashboard(sample), /role="status"[^>]*>Could not sync/);
+  S.sync = { busy: false, message: '', error: false };
   assert.doesNotMatch(renderDashboard(sample), /overview-metrics|Your automations/);
   const settings = renderSettings({ ...sample, settings: {}, version: '0.7.6' });
   assert.match(settings, /Changes save automatically/);
@@ -33,7 +46,79 @@ vm.runInContext(`
   const needsInput = { ...sample, sessions: [{ id: 'one', status: 'input', agent: 'codex', cwd: '/Users/alice/project' }] };
   S.state = needsInput;
   assert.match(renderDashboard(needsInput), /1 task is waiting for you/);
+  const mixed = { ...sample, sessions: [
+    { id: 'done', status: 'done', agent: 'codex' },
+    { id: 'input', status: 'input', agent: 'codex' },
+    { id: 'working', status: 'running', agent: 'codex' },
+  ] };
+  S.state = mixed;
+  const rows = sessionList(mixed);
+  assert.ok(rows.indexOf('data-sid="working"') < rows.indexOf('data-sid="done"'));
+  assert.ok(rows.indexOf('data-sid="working"') < rows.indexOf('data-sid="input"'));
+  assert.equal(mixed.sessions[0].id, 'done');
+  const assigned = { ...mixed,
+    sessions: mixed.sessions.map(s => s.id === 'done' ? { ...s, agent: 'claude' } : s),
+    devices: [{ id: 'keyboard', connected: true, zones: 2, details: {} }],
+    rules: [{ enabled: true, actions: [{ device: 'keyboard', effect: 'sessions', agent: 'claude' }] }],
+  };
+  S.state = assigned;
+  assert.ok(zoneLayout(assigned).placed.has('done'));
+  assert.ok(!zoneLayout(assigned).placed.has('working'));
+  const assignedRows = sessionList(assigned);
+  assert.ok(assignedRows.indexOf('data-sid="working"') < assignedRows.indexOf('data-sid="done"'));
   assert.equal(shortPath('/Users/alice/project'), '…/alice/project');
   assert.equal(shortPath('C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'alice' + String.fromCharCode(92) + 'project'), '…' + String.fromCharCode(92) + 'alice' + String.fromCharCode(92) + 'project');
 `, context);
-console.log('Dashboard smoke checks passed: empty, offline, paused, quiet, needs-input, and native paths.');
+vm.runInContext(`
+  (async () => {
+    const realRefresh = refresh;
+    render = () => {};
+    let calls = 0, release;
+    api = async (method, path) => {
+      assert.equal(method, 'POST');
+      assert.equal(path, '/api/sync');
+      calls++;
+      await new Promise(resolve => { release = resolve; });
+    };
+    refresh = async () => { S.error = null; return { error: null }; };
+    const pending = L.forceSync();
+    assert.equal(S.sync.busy, true);
+    await L.forceSync();
+    assert.equal(calls, 1);
+    release();
+    await pending;
+    assert.equal(S.sync.busy, false);
+    assert.equal(S.sync.error, false);
+    assert.match(S.sync.message, /up to date/);
+    api = async () => { throw new Error('offline'); };
+    await L.forceSync();
+    assert.equal(S.sync.busy, false);
+    assert.equal(S.sync.error, true);
+    assert.match(S.sync.message, /offline/);
+    api = async () => ({});
+    refresh = async () => { S.error = 'offline'; return { error: 'offline' }; };
+    await L.forceSync();
+    assert.equal(S.sync.error, true);
+    assert.match(S.sync.message, /could not refresh/);
+    refresh = async () => ({ superseded: true, error: null });
+    await L.forceSync();
+    assert.equal(S.sync.error, false);
+    assert.match(S.sync.message, /Waiting for the latest/);
+    assert.doesNotMatch(S.sync.message, /up to date/);
+    renderSidebar = () => {};
+    refreshBlocked = () => false;
+    api = async () => S.state;
+    await realRefresh();
+    assert.match(S.sync.message, /up to date/);
+    assert.equal(S.sync.waiting, false);
+    await L.forceSync();
+    api = async () => { throw new Error('offline'); };
+    await realRefresh();
+    assert.equal(S.sync.error, true);
+    assert.equal(S.sync.waiting, false);
+    assert.match(S.sync.message, /could not refresh/);
+  })()
+`, context).then(() => console.log('Dashboard smoke checks passed: disclosure defaults, running priority, force sync states, empty, offline, paused, quiet, and native paths.')).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

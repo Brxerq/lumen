@@ -26,6 +26,8 @@ from lumen.integrations.agent_sessions import CODEX_HOOKS, AgentIntegration
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 STATE_DB = CODEX_HOME / "state_5.sqlite"
 ACTIVE_WINDOW_S = 10 * 60
+# ponytail: unknown-task recovery is capped at 24h; older recovery needs persisted verified liveness.
+RECOVERY_WINDOW_S = 24 * 3600
 
 TURN_OPEN_EVENTS = {"task_started": True, "user_message": True, "task_complete": False, "turn_aborted": False}
 _scan: dict[Path, tuple[int, bool, bool, bool]] = {}  # rollout -> (bytes consumed, turn open, saw metadata, belongs)
@@ -86,12 +88,14 @@ def turn_open(rollout: Path, session_id: str | None = None) -> bool:
     return state
 
 
-def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), metadata: dict[str, dict] | None = None) -> dict[str, bool]:
+def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), metadata: dict[str, dict] | None = None,
+                   recover: bool = False) -> dict[str, bool]:
     """thread_id -> turn open, for recently touched threads plus every hooked
     one (no freshness cutoff there: a closed or archived rollout must keep
     overriding a stuck hook file)."""
     now = now or time.time()
     cutoff_ms = int((now - ACTIVE_WINDOW_S) * 1000)
+    discovery_cutoff_ms = int((now - RECOVERY_WINDOW_S) * 1000) if recover else cutoff_ms
     hooked = list(hooked)
     if not db.is_file():
         return {}
@@ -105,7 +109,7 @@ def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), met
             rows = conn.execute(
                 f"select id, rollout_path, archived, updated_at_ms, {optional('cwd')}, {optional('title')}, {optional('source')} from threads "
                 "where (archived = 0 and updated_at_ms > ?) or id in (%s)"
-                % ",".join("?" * len(hooked)), (cutoff_ms, *hooked)
+                % ",".join("?" * len(hooked)), (discovery_cutoff_ms, *hooked)
             ).fetchall()
     except TrackingUnavailable:
         raise
@@ -118,19 +122,25 @@ def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), met
             continue
         if archived:
             out[tid] = out.get(tid, False)
+            if metadata is not None:
+                metadata[str(tid)] = {"archived": True}
             continue
         rollout = Path(path)
         try:
             state = turn_open(rollout, str(tid))
+            modified = rollout.stat().st_mtime
         except OSError:
             # A file can disappear between SQLite's record and our read. It is
             # not a completion signal; let the tracker retain the last state.
-            rollout_unavailable = True
+            if tid in hooked or updated_ms > cutoff_ms:
+                rollout_unavailable = True
             continue
+        if not state and tid not in hooked and updated_ms <= cutoff_ms:
+            continue  # recovery discovers running tasks without seating old completed history
         out[tid] = out.get(tid, False) or state
         if metadata is not None:
             metadata[str(tid)] = {"started": updated_ms / 1000 if updated_ms else None,
-                                  "ts": updated_ms / 1000 if updated_ms else None,
+                                  "ts": max(modified, updated_ms / 1000 if updated_ms else 0),
                                   "cwd": str(cwd or ""), "title": _display_title(title),
                                   "source": str(source or ""), "tracking_health": "ok"}
     if rollout_unavailable:
@@ -158,7 +168,10 @@ class Codex(AgentIntegration):
         # A quiet tool/delegated turn can stop updating both the thread row and
         # rollout for several minutes. Once observed, keep checking its exact
         # ID until Codex gives us a terminal/archived record.
-        return rollout_states(hooked=list(set(hooked) | known), metadata=self._fallback_records)
+        states = rollout_states(hooked=list(set(hooked) | known), metadata=self._fallback_records,
+                                recover=not getattr(self, "_recovered", False) or self._force_sync)
+        self._recovered = True  # a failed first read must retry startup recovery
+        return states
 
     def start(self) -> None:
         super().start()
