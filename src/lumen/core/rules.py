@@ -35,7 +35,9 @@ EFFECTS: dict[str, dict] = {
                  "params": ["agent", "per_zone", "palette", "offset", "brightness"]},
 }
 
-GREEN, AMBER, RED = (0, 255, 0), (255, 180, 0), (255, 0, 0)
+# A deeper green stays distinct from white backlighting and the dashboard's
+# light-green accents, while still being bright enough for RGB hardware.
+GREEN, AMBER, RED = (0, 143, 61), (255, 180, 0), (255, 0, 0)
 DEFAULT_PALETTE = {"running": AMBER, "input": RED, "done": GREEN}
 
 
@@ -43,7 +45,7 @@ DEFAULT_PALETTE = {"running": AMBER, "input": RED, "done": GREEN}
 class Action:
     device: str = "*"
     effect: str = "flash"
-    color: tuple = (0, 255, 0)
+    color: tuple = GREEN
     duration: float = 1.5       # seconds, whole effect
     count: int = 2              # flashes / pulses / wave passes
     brightness: float = 1.0     # 0..1, multiplies the color
@@ -132,7 +134,7 @@ def _color(value) -> tuple:
         r, g, b = (min(255, max(0, int(c))) for c in value)
         return (r, g, b)
     except (TypeError, ValueError):
-        return (0, 255, 0)
+        return GREEN
 
 
 def default_rules() -> list[Rule]:

@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.8] — 2026-09-09
+
+### Changed
+- Workspace status now leads the dashboard and stays visible; Device preview follows and also stays expanded.
+- The standard completed-task green is now a deeper green across new rules, presets and previews.
+
+### Fixed
+- Completed status-tab rows automatically disappear after 30 minutes by default. The delay is configurable in Settings; active and input-needed tasks remain visible.
+
 ## [0.7.7] — 2026-09-08
 
 ### Added

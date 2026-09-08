@@ -98,6 +98,7 @@ class Notch(ScreenGlow):
         self.position, self.hide_fullscreen = "top", True
         self.offset, self.size, self.opacity = -1, "regular", 96  # along the edge (%), thin/regular/thick, %
         self.idle_hide_min = 0            # hide once no agent has done anything for this long; 0 = never
+        self.completed_hide_min = 30      # retire completed rows; running and input rows always stay visible
         self.port = 6733                  # the dashboard, so a drag can save its new place
         self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
         self.agents = "all"               # whose sessions: all | claude | codex
@@ -116,6 +117,7 @@ class Notch(ScreenGlow):
                    "options": {"position": self.position, "offset": self.offset, "size": self.size,
                                "opacity": self.opacity, "port": self.port, "hide_fullscreen": self.hide_fullscreen,
                                "idle_hide_min": self.idle_hide_min,
+                               "completed_hide_min": self.completed_hide_min,
                                "show": self.show, "agents": self.agents}}
         self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
@@ -147,6 +149,7 @@ def discover(settings: dict | None = None) -> list:
     _instance.opacity = max(30, min(100, int(s.get("notch_opacity", 96) or 96)))
     _instance.port = int(s.get("port", 6733) or 6733)
     _instance.idle_hide_min = max(0, int(s.get("notch_idle_hide_min", 0) or 0))
+    _instance.completed_hide_min = max(0, int(s.get("notch_completed_hide_min", 30) or 0))
     _instance.show = {k: bool((settings or {}).get(f"notch_show_{k}", v)) for k, v in SHOW_DEFAULTS.items()}
     agents = str((settings or {}).get("notch_agents") or "all")
     _instance.agents = agents if agents in ("all", "claude", "codex") else "all"
@@ -268,15 +271,32 @@ def session_rows(sessions: list[dict], *, prioritize: bool = True) -> list[tuple
     return out
 
 
-def visible_sessions(sessions: list[dict], options: dict) -> list[dict]:
-    """The session records represented by the visible rows, in row order."""
+def visible_sessions(sessions: list[dict], options: dict, now: float | None = None) -> list[dict]:
+    """The session records represented by visible rows, in row order.
+
+    Completed tabs age out of the status tab, while working and input tabs stay
+    visible.  This is display-only: the dashboard keeps the complete session
+    history until the agent itself closes it.
+    """
     raw_show = options.get("show")
     show: dict = raw_show if isinstance(raw_show, dict) else {}
     if not bool(show.get("sessions", True)):
         return []
     agent = str(options.get("agents") or "all")
+    hide_after = options.get("completed_hide_min", 30)
+    minutes = max(0, int(hide_after)) if isinstance(hide_after, (int, float)) else 30
+    current = time.time() if now is None else now
+
+    def keep(session: dict) -> bool:
+        if agent != "all" and session.get("agent") != agent:
+            return False
+        if minutes <= 0 or session.get("status") != "done":
+            return True
+        stamp = session.get("ts")
+        return not isinstance(stamp, (int, float)) or current - stamp < minutes * 60
+
     return [s for s in sorted(sessions, key=_session_order)
-            if agent == "all" or s.get("agent") == agent]
+            if keep(s)]
 
 
 def tab_x(screen_w: int, tab_w: int, position: str, offset: int = -1, margin: int = 24) -> int:

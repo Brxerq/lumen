@@ -319,9 +319,9 @@ def test_sessions_effect_paints_one_zone_per_slot():
         {"id": "a", "slot": 0, "status": "done"}, {"id": "b", "slot": 1, "status": "input"},
         {"id": "c", "slot": 4, "status": "running"}]})
     assert sorted(p.run(Action(device="*", effect="sessions"), ev)) == ["bulb", "light"]
-    assert light.zones[-1] == [(0, 255, 0), (255, 0, 0), (255, 180, 0)]  # slot 4 is busy: borrows the free zone
+    assert light.zones[-1] == [(0, 143, 61), (255, 0, 0), (255, 180, 0)]  # slot 4 is busy: borrows the free zone
     assert bulb.colors[-1] == (255, 0, 0)                                 # no zones -> folded status
-    assert p.current_zones("light") == [(0, 255, 0), (255, 0, 0), (255, 180, 0)]
+    assert p.current_zones("light") == [(0, 143, 61), (255, 0, 0), (255, 180, 0)]
     # offset shows later slots; the one tab it can see stretches over the whole device
     p.run(Action(device="light", effect="sessions", offset=4), ev)
     assert light.zones[-1] == [(255, 180, 0)] * 3
@@ -332,7 +332,7 @@ def test_sessions_effect_paints_one_zone_per_slot():
     assert light.zones[-1] == [(255, 180, 0)] * 3
     # no sessions at all: the idle colour everywhere, not a dead device
     p.run(Action(device="light", effect="sessions"), Event("agents.sessions", "claude", {"status": "done", "sessions": []}))
-    assert light.zones[-1] == [(0, 255, 0)] * 3
+    assert light.zones[-1] == [(0, 143, 61)] * 3
     # a custom palette round-trips through from_dict
     a = Action.from_dict({"effect": "sessions", "palette": {"done": "#0000ff"}, "offset": "2"})
     assert a.palette["done"] == (0, 0, 255) and a.palette["input"] == (255, 0, 0) and a.offset == 2
@@ -348,11 +348,11 @@ def test_sessions_effect_shows_busy_tabs_beyond_the_last_zone():
                             kb.zones[-1])[1]
     idle = lambda i: {"id": f"i{i}", "slot": i, "status": "done"}
     # a working tab on slot 5 borrows the last idle zone; a needs-you tab borrows before it
-    assert run([idle(0), idle(1), idle(2), {"id": "w", "slot": 5, "status": "running"}]) ==         [(0, 255, 0), (0, 255, 0), (255, 180, 0)]
+    assert run([idle(0), idle(1), idle(2), {"id": "w", "slot": 5, "status": "running"}]) ==         [(0, 143, 61), (0, 143, 61), (255, 180, 0)]
     assert run([idle(0), idle(1), idle(2), {"id": "w", "slot": 5, "status": "running"},
-                {"id": "q", "slot": 7, "status": "input"}]) == [(0, 255, 0), (255, 180, 0), (255, 0, 0)]
+                {"id": "q", "slot": 7, "status": "input"}]) == [(0, 143, 61), (255, 180, 0), (255, 0, 0)]
     # a free zone is used before an idle one is taken; the two tabs then share the three zones
-    assert run([idle(0), {"id": "w", "slot": 4, "status": "running"}]) == [(0, 255, 0), (0, 255, 0), (255, 180, 0)]
+    assert run([idle(0), {"id": "w", "slot": 4, "status": "running"}]) == [(0, 143, 61), (0, 143, 61), (255, 180, 0)]
     assert run([{"id": "a", "slot": 0, "status": "running"}, {"id": "b", "slot": 1, "status": "input"},
                 {"id": "c", "slot": 2, "status": "running"}, {"id": "w", "slot": 9, "status": "input"}]) ==         [(255, 180, 0), (255, 0, 0), (255, 180, 0)]
 
@@ -363,7 +363,7 @@ def test_open_tabs_share_every_zone_of_the_device():
     kb = FakeLight("kb", zones=4)
     p = EffectPlayer(fps=200)
     p.set_devices([kb])
-    green, amber, red = (0, 255, 0), (255, 180, 0), (255, 0, 0)
+    green, amber, red = (0, 143, 61), (255, 180, 0), (255, 0, 0)
     run = lambda *statuses: (p.run(Action(device="kb", effect="sessions"),
                                    Event("agents.sessions", "claude", {"sessions": [
                                        {"id": str(i), "slot": i, "status": s} for i, s in enumerate(statuses)]})),
@@ -389,7 +389,7 @@ def test_sessions_effect_agent_filter_and_folded_layout():
     # keyboard = Claude only, re-ranked so there is no hole where the Codex session sits,
     # and two tabs over four zones take half the keyboard each
     p.run(Action(device="kb", effect="sessions", agent="claude"), ev)
-    assert kb.zones[-1] == [(0, 255, 0), (0, 255, 0), (255, 0, 0), (255, 0, 0)]
+    assert kb.zones[-1] == [(0, 143, 61), (0, 143, 61), (255, 0, 0), (255, 0, 0)]
     # light bar = Codex folded onto the whole device: a running session wins over a done one
     p.run(Action(device="bar", effect="sessions", agent="codex", per_zone=False), ev)
     assert bar.colors[-1] == (255, 180, 0)
@@ -397,7 +397,7 @@ def test_sessions_effect_agent_filter_and_folded_layout():
     a = Action.from_dict({"device": "bar", "effect": "sessions", "agent": " Codex ", "per_zone": 0})
     assert a.agent == "codex" and a.per_zone is False
     p.run(a, Event("agents.sessions", "x", {"status": "done", "sessions": []}))
-    assert bar.colors[-1] == (0, 255, 0)
+    assert bar.colors[-1] == (0, 143, 61)
     assert effects.agent_sessions(ev.data["sessions"], "codex") == [
         {"id": "x", "agent": "codex", "slot": 0, "status": "running"}, {"id": "y", "agent": "codex", "slot": 1, "status": "done"}]
 

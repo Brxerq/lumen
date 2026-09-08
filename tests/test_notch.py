@@ -85,7 +85,8 @@ def test_settings_accept_the_new_notch_knobs():
     from lumen.core.config import _coerce
     assert _coerce("notch_offset", 37) == 37 and _coerce("notch_offset", -1) == -1
     assert _coerce("notch_size", "thin") == "thin" and _coerce("notch_opacity", "80") == 80
-    for key, bad in (("notch_offset", 101), ("notch_opacity", 10), ("notch_size", "huge")):
+    assert _coerce("notch_completed_hide_min", "30") == 30
+    for key, bad in (("notch_offset", 101), ("notch_opacity", 10), ("notch_completed_hide_min", 1441), ("notch_size", "huge")):
         with pytest.raises(ValueError):
             _coerce(key, bad)
 
@@ -99,6 +100,19 @@ def test_the_tab_hides_when_nothing_has_happened_for_a_while():
     assert idle_hidden([{"status": "running", "ts": 1_000}], 10, now=1_000 + 601) is False   # still working
     assert idle_hidden([{"status": "input", "ts": 1_000}], 10, now=1_000 + 601) is False     # still waiting on you
     assert idle_hidden([], 10, now=100_000) is True                     # no tabs at all counts as idle
+
+
+def test_completed_tabs_age_out_without_hiding_active_tabs():
+    from lumen.devices.notch import visible_sessions
+
+    sessions = [
+        {"id": "old", "status": "done", "ts": 1_000},
+        {"id": "recent", "status": "done", "ts": 2_500},
+        {"id": "working", "status": "running", "ts": 1_000},
+        {"id": "waiting", "status": "input", "ts": 1_000},
+    ]
+    assert [s["id"] for s in visible_sessions(sessions, {"completed_hide_min": 30}, now=3_000)] == ["working", "waiting", "recent"]
+    assert [s["id"] for s in visible_sessions(sessions, {"completed_hide_min": 0}, now=99_000)] == ["working", "waiting", "old", "recent"]
 
 
 def test_bars_carry_their_agents_colour():

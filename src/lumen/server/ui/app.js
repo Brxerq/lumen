@@ -2,13 +2,13 @@
 "use strict";
 
 const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, request: 0, pendingRender: false, sync: { busy: false, message: "", error: false } };
-const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 255, 0] };
+const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 143, 61] };
 const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 // Long working directories are noise; the last two segments say where you are,
 // and the full path is still on the title attribute.
 const shortPath = p => { const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/); const sep = String(p || "").includes("\\") ? "\\" : "/"; return parts.length > 2 ? "…" + sep + parts.slice(-2).join(sep) : p; };
-const PRESETS = ["#5fe36a", "#ffc23d", "#ff5d5d", "#5b9dff", "#4dd0e1", "#c084fc", "#ffffff"];
+const PRESETS = ["#008f3d", "#ffc23d", "#ff5d5d", "#5b9dff", "#4dd0e1", "#c084fc", "#ffffff"];
 // Feed filters. Each is a prefix test on the event type, so a new event family
 // falls into "Everything else" instead of disappearing.
 const FEED_FILTERS = [["", "All"], ["agent", "Agents"], ["build,deploy", "Builds"], ["command,timer", "Commands"], ["other", "Everything else"]];
@@ -180,7 +180,7 @@ function testMenu(d) {
   const effs = effectsFor(d);
   if (!effs.length) return "";
   return `<div class="menu-wrap"><button class="btn sm" onclick="L.menu(this)">Test <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-    <div class="menu"><label class="menu-color"><input type="color" class="color-input" value="${S.testColor[d.id] || "#5fe36a"}" oninput="L.testColor('${js(d.id)}', this.value)"><span>Test color</span></label><div class="sep"></div>${effs.filter(e => e.id !== "sessions" && e.id !== "sound").map(e => `<button onclick="L.test('${js(d.id)}','${js(e.id)}')">${h(e.label)}</button>`).join("")}${effs.some(e => e.id === "sound")
+    <div class="menu"><label class="menu-color"><input type="color" class="color-input" value="${S.testColor[d.id] || "#008f3d"}" oninput="L.testColor('${js(d.id)}', this.value)"><span>Test color</span></label><div class="sep"></div>${effs.filter(e => e.id !== "sessions" && e.id !== "sound").map(e => `<button onclick="L.test('${js(d.id)}','${js(e.id)}')">${h(e.label)}</button>`).join("")}${effs.some(e => e.id === "sound")
       ? soundChoices().map(([n, label]) => `<button onclick="L.test('${js(d.id)}','sound','${js(n)}')">${h(label)}</button>`).join("") : ""}</div></div>`;
 }
 
@@ -208,9 +208,7 @@ function renderDashboard(st) {
   <div class="page-head dashboard-head"><div><h1>Overview</h1><p>Your agents, at a glance.</p></div>
     <div class="page-actions"><button class="btn primary" onclick="L.forceSync()" ${S.sync.busy ? 'disabled aria-busy="true"' : 'aria-busy="false"'}>${S.sync.busy ? "Syncing…" : "Force sync"}</button><a class="btn" href="#integrations">Connect an agent <span aria-hidden="true">↗</span></a></div></div>
   <p class="sync-status${S.sync.error ? " sync-error" : ""}" role="status" aria-live="polite">${h(S.sync.message)}</p>
-  <details class="disclosure" id="dashboard-lights" open><summary><span>Device preview<small>${busy ? `${busy} ${busy === 1 ? "session" : "sessions"} running · ` : ""}See your lights and adjust their layout</small></span></summary><div class="disclosure-body">${st.devices.length ? liveBoard(st) + deviceStrip(st) : `<p class="muted">No devices connected yet. <a class="more" href="#devices">Find devices →</a></p>`}</div></details>
-
-  <details class="disclosure" id="dashboard-status"><summary><span>Workspace status<small>${h(headline)}</small></span></summary><div class="disclosure-body">
+  <section class="disclosure fixed-dashboard-card" id="dashboard-status" aria-label="Workspace status"><div class="fixed-card-head">Workspace status<small>${h(headline)}</small></div><div class="disclosure-body">
   <section class="card section overview" aria-label="Workspace status"><div class="hero ${tone}">
     <div class="hero-orb" aria-hidden="true"><i></i></div>
     <div class="hero-text"><b>${h(headline)}</b><span>${h(sub)}</span></div>
@@ -222,7 +220,8 @@ function renderDashboard(st) {
   </section>
   <div class="overview-links"><a href="#devices"><span class="dot ${on.length ? "on" : ""}" aria-hidden="true"></span>${on.length} devices connected <span aria-hidden="true">↗</span></a><a href="#automations">${rules.length} automations enabled <span aria-hidden="true">↗</span></a></div>
   ${st.quiet_now ? `<div class="dashboard-notice"><span class="dot warn" aria-hidden="true"></span><span>Quiet hours are active. Some effects may be muted.</span><a href="#settings">Manage quiet hours →</a></div>` : ""}
-  </div></details>
+  </div></section>
+  <section class="disclosure fixed-dashboard-card" id="dashboard-lights" aria-label="Device preview"><div class="fixed-card-head">Device preview<small>${busy ? `${busy} ${busy === 1 ? "session" : "sessions"} running · ` : ""}See your lights and adjust their layout</small></div><div class="disclosure-body">${st.devices.length ? liveBoard(st) + deviceStrip(st) : `<p class="muted">No devices connected yet. <a class="more" href="#devices">Find devices →</a></p>`}</div></section>
   <details class="disclosure" id="dashboard-sessions"><summary><span>Agent sessions<small>${busy} running · ${needs} need input · ${sess.length} tracked</small></span></summary><div class="disclosure-body">${sessionList(st)}</div></details>
 
       <details class="disclosure" id="dashboard-activity"><summary><span>Recent activity<small>Events from your agents and automations</small></span></summary><div class="disclosure-body"><div class="section-head">
@@ -372,7 +371,7 @@ function liveBoard(st) {
       <div class="board-legend">
         <span><i class="swatch-sm" style="background:#fbbf24"></i>working</span>
         <span><i class="swatch-sm" style="background:#f87171"></i>needs you</span>
-        <span><i class="swatch-sm" style="background:#4ade80"></i>done</span>
+        <span><i class="swatch-sm" style="background:#008f3d"></i>done</span>
         <span class="dim">Every block is one agent tab. Open tabs share the device between them.</span>
       </div>
     </div></div></div>`;
@@ -658,7 +657,7 @@ function md(text) {
 
 function renderEffects(st) {
   const devs = st.devices.filter(d => d.capabilities.length && d.details.enabled !== false);
-  const d = S.bench || (S.bench = { devices: devs.map(x => x.id), effect: "flash", color: "#5fe36a", count: 2, duration: 1.5, message: "Hello from Lumen", sound: soundChoices()[0][0] });
+  const d = S.bench || (S.bench = { devices: devs.map(x => x.id), effect: "flash", color: "#008f3d", count: 2, duration: 1.5, message: "Hello from Lumen", sound: soundChoices()[0][0] });
   return `
   <div class="page-head"><div><h1>Playground</h1><p>Pick devices, an effect and a colour, then play it on the hardware. Nothing here is saved.</p></div></div>
   <div class="two-col">
@@ -724,6 +723,7 @@ function renderSettings(st) {
     ${s.notch ? row("Opacity", "How solid the tab is over whatever is behind it.", `<div class="inline"><input type="range" min="30" max="100" value="${s.notch_opacity ?? 96}" aria-label="Status tab opacity" onchange="L.setting('notch_opacity', +this.value)"><span class="muted small">${s.notch_opacity ?? 96}%</span></div>`) : ""}
     ${s.notch ? row("Hide during full-screen apps", "Games, films and presentations keep the whole screen. Double-click the tab to pin it open.", tog("notch_hide_fullscreen")) : ""}
     ${s.notch ? row("Hide when idle", "Minutes with no tab working or waiting on you before the tab goes away. 0 keeps it up. It comes back the moment an agent does something.", `<div class="inline"><input class="input num" type="number" min="0" max="1440" value="${s.notch_idle_hide_min ?? 0}" aria-label="Minutes idle before the status tab hides" onchange="L.setting('notch_idle_hide_min', +this.value)"><span class="muted small">min</span></div>`) : ""}
+    ${s.notch ? row("Hide completed tabs after", "Finished tabs leave the screen status tab after this many minutes. Working and input tabs always stay visible. Set 0 to keep completed tabs.", `<div class="inline"><input class="input num" type="number" min="0" max="1440" value="${s.notch_completed_hide_min ?? 30}" aria-label="Minutes before completed tabs hide from the status tab" onchange="L.setting('notch_completed_hide_min', +this.value)"><span class="muted small">min</span></div>`) : ""}
     ${s.notch ? row("Whose tabs", "Show every agent's sessions, or just one agent's.", `<select class="input" aria-label="Which agents the status tab shows" onchange="L.setting('notch_agents', this.value)">${[["all", "Claude and Codex"], ["claude", "Claude only"], ["codex", "Codex only"]].map(([v, name]) => `<option value="${v}" ${s.notch_agents === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
     ${s.notch ? row("What it shows", "Untick anything you don't want. Just the Claude limits and the live tabs is a popular pick.", `<div class="checks">${[["notch_show_sessions", "Live tabs"], ["notch_show_activity", "What each tab is doing"], ["notch_show_context", "Context window"], ["notch_show_cost", "Session cost"], ["notch_show_claude_usage", "Claude usage limits"], ["notch_show_codex_usage", "Codex usage limits"], ["notch_show_accent", "Agent colour on each bar"], ["notch_show_usage_follows_tabs", "Limits only while that agent has a tab open"]].map(([k, name]) => `<label class="check"><input type="checkbox" ${s[k] !== false ? "checked" : ""} onchange="L.setting('${k}', this.checked)"> ${name}</label>`).join("")}</div>`) : ""}
   </div></details>
@@ -819,12 +819,12 @@ function actionEditor(a, i, devs) {
     ${a.device === "*" ? `<div class="hint dim small">Runs on every device that supports it; backlights without color pulse their brightness instead.</div>` : ""}
   </div>`;
 }
-function newAction() { return { device: "*", effect: "flash", color: [95, 227, 106], duration: 1.5, count: 2, brightness: 1, message: "", sound: soundChoices()[0][0], palette: { ...DEF_PALETTE }, offset: 0, agent: "", per_zone: true }; }
+function newAction() { return { device: "*", effect: "flash", color: [0, 143, 61], duration: 1.5, count: 2, brightness: 1, message: "", sound: soundChoices()[0][0], palette: { ...DEF_PALETTE }, offset: 0, agent: "", per_zone: true }; }
 function openModal(html) { $("#modal-root").innerHTML = html; }
 
 // ---------- onboarding wizard ----------
 function openWizard() {
-  S.wizard = { step: 0, scanned: false, choice: { effect: "flash", color: "#5fe36a", devices: "*", notify: true } };
+  S.wizard = { step: 0, scanned: false, choice: { effect: "flash", color: "#008f3d", devices: "*", notify: true } };
   renderWizard();
   act(() => api("POST", "/api/scan")).then(() => { S.wizard && (S.wizard.scanned = true); renderWizard(); });
 }
@@ -911,7 +911,7 @@ const L = window.L = {
   },
   testColor(id, v) { S.testColor[id] = v; },
   forget: id => act(() => api("DELETE", `/api/sessions/${id}`), r => r.forgotten ? "session forgotten" : "no hook file for that session (it is tracked from the agent's own record)"),
-  test: (id, effect, sound) => act(() => api("POST", `/api/devices/${id}/test`, { effect, sound, color: rgb(S.testColor[id] || "#5fe36a"), count: 2, duration: 1.5 }),
+  test: (id, effect, sound) => act(() => api("POST", `/api/devices/${id}/test`, { effect, sound, color: rgb(S.testColor[id] || "#008f3d"), count: 2, duration: 1.5 }),
     r => r.touched.length ? `Playing ${sound || effect} on ${deviceById(id)?.name || id}` : `${deviceById(id)?.name || id} is disabled or can't do ${effect}`),
   scan: () => act(() => api("POST", "/api/scan"), r => `${r.devices.length} device(s) found`),
   pause: v => act(() => api("POST", "/api/pause", { paused: v })),

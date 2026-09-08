@@ -479,6 +479,8 @@ kbd { font-family: var(--mono); font-size: var(--fs-xs); background: var(--panel
 .disclosure[open] > summary { border-bottom: 1px solid var(--border); }
 .disclosure > summary:hover { color: var(--green-ink); }
 .disclosure > summary small { display: block; font-weight: 400; font-size: var(--fs-sm); color: var(--muted); margin-top: 3px; }
+.fixed-card-head { padding: 20px 24px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.fixed-card-head small { display: block; font-weight: 400; font-size: var(--fs-sm); color: var(--muted); margin-top: 3px; }
 .disclosure-body { padding: 20px 24px; }
 .disclosure-body .section:last-child { margin-bottom: 0; }
 .settings-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 28px; align-items: start; }

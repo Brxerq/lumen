@@ -22,9 +22,12 @@ vm.runInContext(`
   S.error = null;
   assert.match(renderDashboard(sample), /<details[^>]+id="dashboard-activity"/);
   const dashboard = renderDashboard(sample);
-  assert.match(dashboard, /<details[^>]+id="dashboard-lights"[^>]* open/);
-  assert.equal(dashboard.match(/<details[^>]+id="([^"]+)"/)[1], 'dashboard-lights');
-  for (const id of ['dashboard-status', 'dashboard-sessions', 'dashboard-activity']) {
+  assert.equal(dashboard.match(/id="(dashboard-[^"]+)"/)[1], 'dashboard-status');
+  for (const id of ['dashboard-status', 'dashboard-lights']) {
+    assert.match(dashboard, new RegExp('<section[^>]+id="' + id + '"[^>]*>'));
+    assert.doesNotMatch(dashboard, new RegExp('<details[^>]+id="' + id + '"'));
+  }
+  for (const id of ['dashboard-sessions', 'dashboard-activity']) {
     assert.match(dashboard, new RegExp('<details[^>]+id="' + id + '"[^>]*>'));
     assert.doesNotMatch(dashboard, new RegExp('<details[^>]+id="' + id + '"[^>]* open'));
   }

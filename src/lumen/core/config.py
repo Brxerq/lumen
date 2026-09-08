@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
     "notch": True,                # the status tab at the top of the screen (devices/notch.py)
     "notch_position": "top",      # top | top-left | top-right | bottom | left | right
     "notch_idle_hide_min": 0,     # hide the tab once no agent has done anything for N minutes; 0 = never
+    "notch_completed_hide_min": 30,  # remove completed tabs from the status tab after N minutes; 0 = never
     "notch_offset": -1,           # where along the edge, 0..100 % of the screen width; -1 = the preset above
     "notch_size": "regular",      # thin | regular | thick
     "notch_opacity": 96,          # 30..100 %
@@ -63,7 +64,8 @@ _HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 # Settings a user can put out of range. Values outside these bounds are refused
 # rather than clamped: a silently moved port is worse than an error message.
 SETTING_RANGES = {"port": (1024, 65535), "rescan_interval_s": (0, 86400),
-                  "notch_offset": (-1, 100), "notch_opacity": (30, 100), "notch_idle_hide_min": (0, 1440)}
+                  "notch_offset": (-1, 100), "notch_opacity": (30, 100), "notch_idle_hide_min": (0, 1440),
+                  "notch_completed_hide_min": (0, 1440)}
 
 
 def _coerce(key: str, value):
