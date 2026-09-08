@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- Test menus now stay aligned with their buttons instead of being displaced or clipped inside dashboard cards and setup screens.
+
 ## [0.7.8] — 2026-09-09
 
 ### Changed

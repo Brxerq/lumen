@@ -11,6 +11,8 @@ const context = vm.createContext({
   assert,
 });
 const source = fs.readFileSync(path.join(__dirname, '../src/lumen/server/ui/app.js'), 'utf8');
+assert.match(source, /document\.body\.append\(menu\)/);
+assert.match(source, /\.menu\.portal-open/);
 vm.runInContext(source.split('// ---------- boot ----------')[0], context);
 vm.runInContext(`
   const sample = { devices: [], rules: [], sessions: [], activity: [], messages: [], uptime_s: 60 };
@@ -71,6 +73,25 @@ vm.runInContext(`
   assert.ok(assignedRows.indexOf('data-sid="working"') < assignedRows.indexOf('data-sid="done"'));
   assert.equal(shortPath('/Users/alice/project'), '…/alice/project');
   assert.equal(shortPath('C:' + String.fromCharCode(92) + 'Users' + String.fromCharCode(92) + 'alice' + String.fromCharCode(92) + 'project'), '…' + String.fromCharCode(92) + 'alice' + String.fromCharCode(92) + 'project');
+
+  const classes = () => ({ values: new Set(), add(v) { this.values.add(v); }, remove(v) { this.values.delete(v); }, contains(v) { return this.values.has(v); } });
+  const wrap = { classList: classes(), querySelector: () => menu };
+  const anchor = { isConnected: true, replaceWith(node) { node.parentElement = wrap; } };
+  const menu = { classList: classes(), style: {}, offsetWidth: 214, offsetHeight: 180,
+    replaceWith() { this.parentElement = null; } };
+  const button = { parentElement: wrap, getBoundingClientRect: () => ({ top: 100, bottom: 138, right: 468 }) };
+  document.body = { append(node) { node.parentElement = this; } };
+  document.createComment = () => anchor;
+  document.querySelectorAll = selector => selector === '.menu-wrap.open' && wrap.classList.contains('open') ? [wrap] : [];
+  this.innerWidth = 700; this.innerHeight = 600;
+  L.menu(button);
+  assert.equal(menu.parentElement, document.body);
+  assert.equal(menu.classList.contains('portal-open'), true);
+  assert.equal(menu.style.left, '254px');
+  assert.equal(menu.style.top, '145px');
+  closeMenus(false);
+  assert.equal(menu.parentElement, wrap);
+  assert.equal(menu.classList.contains('portal-open'), false);
 `, context);
 vm.runInContext(`
   (async () => {

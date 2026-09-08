@@ -1,7 +1,7 @@
 /* Lumen dashboard — vanilla JS, no build step. Talks to the local JSON API. */
 "use strict";
 
-const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, request: 0, pendingRender: false, sync: { busy: false, message: "", error: false } };
+const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, menu: null, request: 0, pendingRender: false, sync: { busy: false, message: "", error: false } };
 const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 143, 61] };
 const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
@@ -73,6 +73,15 @@ async function api(method, path, body) {
 }
 function closeMenus(flush = true) {
   document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open"));
+  // Menus are portalled to body while open so a card's overflow or backdrop
+  // filter cannot turn their viewport coordinates into local coordinates.
+  const active = S.menu;
+  if (active) {
+    active.menu.classList.remove("portal-open");
+    if (active.anchor.isConnected) active.anchor.replaceWith(active.menu);
+    else active.menu.remove();
+    S.menu = null;
+  }
   if (flush) flushPendingRender();
 }
 function toast(text, err) {
@@ -903,8 +912,16 @@ const L = window.L = {
     const wrap = btn.parentElement, open = wrap.classList.contains("open");
     closeMenus(false);
     if (open) { flushPendingRender(); return; }
-    wrap.classList.add("open");
     const menu = wrap.querySelector(".menu"), at = btn.getBoundingClientRect();
+    // A backdrop-filter creates a containing block for fixed descendants. Move
+    // this shared menu to body before calculating its viewport position so it
+    // stays beside its button on dashboard cards, device rows and the wizard.
+    const anchor = document.createComment("test menu");
+    menu.replaceWith(anchor);
+    document.body.append(menu);
+    wrap.classList.add("open");
+    menu.classList.add("portal-open");
+    S.menu = { menu, anchor };
     const room = innerHeight - at.bottom - 16 >= menu.offsetHeight;
     menu.style.left = `${Math.max(8, Math.min(at.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
     menu.style.top = room ? `${at.bottom + 7}px` : `${Math.max(8, at.top - menu.offsetHeight - 7)}px`;
@@ -1181,7 +1198,10 @@ addEventListener("resize", closeMenus);
 // a nav link straight after editing a name is a navigation, not a refresh, and
 // used to leave you on the same page.
 window.addEventListener("hashchange", () => { S.page = location.hash.slice(1) || "dashboard"; document.activeElement?.blur?.(); if (S.draft) L.closeModal(); render(); pollSoon(); });
-document.addEventListener("click", e => { if (!e.target.closest(".menu-wrap")) closeMenus(); });
+document.addEventListener("click", e => {
+  if (e.target.closest(".menu.portal-open button")) return closeMenus();
+  if (!e.target.closest(".menu-wrap, .menu.portal-open")) closeMenus();
+});
 document.addEventListener("focusout", () => setTimeout(flushPendingRender));
 applyTheme(currentTheme());
 S.page = location.hash.slice(1) || "dashboard";
