@@ -45,13 +45,12 @@ def three_tabs(tmp_path, monkeypatch):
     return records
 
 
-def test_a_new_tab_opens_on_the_first_zone(three_tabs):
-    """With more tabs than zones, the tab you just started is the one you want
-    to see: it takes zone 0 and pushes the rest along."""
-    assert [s["id"] for s in ag.all_sessions()] == ["c", "b", "a"]  # c started last
+def test_a_new_tab_uses_a_free_zone_without_moving_existing_tabs(three_tabs):
+    """Opening a tab must not silently move established task placements."""
+    assert [s["id"] for s in ag.all_sessions()] == ["a", "b", "c"]
     ag._update_sessions("claude", {sid: ag.RUNNING for sid in [*three_tabs, "d"]},
                         {**three_tabs, "d": {"started": 1_700_000_009, "cwd": "C:/p3"}})
-    assert [s["id"] for s in ag.all_sessions()] == ["d", "c", "b", "a"]
+    assert [s["id"] for s in ag.all_sessions()] == ["a", "b", "c", "d"]
 
 
 def test_set_slot_swaps_and_leaves_everyone_else_alone(three_tabs):

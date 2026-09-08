@@ -48,6 +48,21 @@ def test_thin_and_thick_tabs_render():
     assert panel_row_at(SIZES["thin"][0] + 12, 1, SIZES["thick"][0]) is None
 
 
+def test_clickable_notch_sessions_match_the_filtered_rows():
+    from lumen.devices.notch import session_rows, visible_sessions
+    sessions = [{"id": "codex", "agent": "codex", "slot": 0}, {"id": "claude", "agent": "claude", "slot": 1}]
+    assert [s["id"] for s in visible_sessions(sessions, {"agents": "claude", "show": {"sessions": True}})] == ["claude"]
+    assert visible_sessions(sessions, {"agents": "all", "show": {"sessions": False}}) == []
+    assert visible_sessions(sessions, {"agents": "all", "show": True}) == sessions
+    assert session_rows([{"agent": "codex", "title": "Quiet task", "status": "running"}])[0][1] == "Quiet task"
+
+
+def test_notch_only_advertises_focus_for_claude(monkeypatch):
+    from lumen.devices.notch import focus_session
+    monkeypatch.setattr("lumen.devices.notch.session_pids", lambda: {"claude": 42})
+    assert focus_session({"id": "codex", "agent": "codex"}) is False
+
+
 def test_settings_accept_the_new_notch_knobs():
     import pytest
 

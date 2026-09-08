@@ -50,6 +50,7 @@ RUNNING, INPUT, DONE = "running", "input", "done"
 PRIORITY = (INPUT, RUNNING, DONE)
 STALE_AFTER_S = 4 * 3600  # a session whose hooks went silent this long is gone
 GONE_GRACE_S = 120        # ...or this long, once the agent's own record has dropped it
+_dismissed: dict[str, str] = {}  # session id -> last hidden status; a new turn restores it
 
 # hook_event_name -> status. SessionEnd maps to None: forget the session.
 HOOK_EVENTS = {
@@ -412,11 +413,24 @@ def read_sessions(state_dir: Path | None = None, now: float | None = None) -> di
 
 
 def forget_session(session_id: str, state_dir: Path | None = None) -> bool:
-    """Drop a session file (dashboard "dismiss" for a tab that never sent SessionEnd)."""
+    """Hide a tracked tab until it completes and starts another turn.
+
+    This deliberately does not archive or delete a Codex task. Hook files are
+    removed when present, but fallback-only tasks are hidden too.
+    """
     path = (state_dir or paths.sessions_dir()) / f"{session_id}.json"
-    if not path.is_file():
+    with _latest_lock:
+        session = _sessions.pop(session_id, None)
+        if session is not None:
+            _dismissed[session_id] = str(session.get("status") or "")
+            _rebuild()
+    if session is not None:
+        slots.remember(session_id, session.get("cwd", ""), dismissed_status=_dismissed[session_id])
+    if path.is_file():
+        path.unlink(missing_ok=True)
+        return True
+    if session is None:
         return False
-    path.unlink(missing_ok=True)
     return True
 
 
@@ -428,15 +442,23 @@ def aggregate(statuses) -> str:
     return DONE
 
 
-def session_statuses(hooked: dict[str, str], truth: dict[str, bool]) -> dict[str, str]:
+def session_statuses(hooked: dict[str, str], truth: dict[str, bool], records: dict[str, dict] | None = None,
+                     truth_records: dict[str, dict] | None = None) -> dict[str, str]:
     """session_id -> status. The agent's own record (transcript / rollout) is
     the authority on open/closed: hooks are async, can lose the Stop-vs-PostToolUse
     race, and an aborted turn (Esc) fires no Stop at all. Hooks still supply
     `input`, which the record can't see."""
+    records, truth_records = records or {}, truth_records or {}
     out = {}
     for sid in hooked.keys() | truth.keys():
         if sid in truth:
-            out[sid] = (INPUT if hooked.get(sid) == INPUT else RUNNING) if truth[sid] else DONE
+            hook_status = hooked.get(sid)
+            hook_ts = records.get(sid, {}).get("ts") or 0
+            truth_ts = truth_records.get(sid, {}).get("ts") or 0
+            # A prompt hook may arrive before Codex appends a fresh task_started
+            # record. Do not let an older terminal boundary finish that new turn.
+            newer_hook = hook_status in (RUNNING, INPUT) and hook_ts > truth_ts
+            out[sid] = (INPUT if hook_status == INPUT else RUNNING) if truth[sid] or newer_hook else DONE
         else:
             out[sid] = hooked[sid]
     return out
@@ -463,6 +485,7 @@ def prune_gone(statuses: dict[str, str], truth: dict[str, bool], records: dict[s
 _latest: dict[str, str] = {}        # agent -> last status, for the folded agents.status event
 _latest_lock = threading.Lock()
 _TRANSITION = {RUNNING: "agent.running", INPUT: "agent.needs_input", DONE: "agent.finished"}
+_SESSION_TRANSITION = {RUNNING: "agent.session.running", INPUT: "agent.session.needs_input", DONE: "agent.session.finished"}
 
 # Every live session of every agent, with a sticky slot: a session keeps its
 # slot (= keyboard zone) until it ends; a new one opens on zone 0, pushing the
@@ -490,28 +513,33 @@ def _update_sessions(agent: str, statuses: dict[str, str], records: dict[str, di
         # and push the tab that is actually working off the keyboard. Once seated,
         # it keeps its zone until the process is gone, like any other session.
         new = sorted((s for s in set(statuses) - set(_sessions) if s in records or statuses[s] != DONE),
-                     key=lambda s: (float("inf") if first_seen(s) is None else first_seen(s), s))
+                     key=lambda s: (statuses[s] == DONE, float("inf") if first_seen(s) is None else first_seen(s), s))
         for sid in new:
             pin = slots.pinned(sid, records.get(sid, {}).get("cwd", ""))
             slot = pin.get("slot")
             if not isinstance(slot, int) or slot in taken:
-                # An unpinned tab opens on the first zone and pushes the rest
-                # along: with more tabs than zones, the one you just started is
-                # the one you want to see.
-                for other in _sessions.values():
-                    other["slot"] += 1
-                taken = {v["slot"] for v in _sessions.values()}
-                slot = 0
+                # Never move established placements behind the user's back.
+                # Reuse the first gap left by a closed/dismissed unpinned tab.
+                slot = next((i for i in range(MAX_SLOT + 1) if i not in taken), max(taken, default=-1) + 1)
             taken.add(slot)
             _sessions[sid] = {"id": sid, "agent": agent, "slot": slot, "label": pin.get("label", "")}
         for sid, status in statuses.items():
             if sid not in _sessions:
                 continue
             r = records.get(sid, {})
-            _sessions[sid].update(status=status, started=r.get("started"), ts=r.get("ts"), cwd=r.get("cwd", ""),
-                                  context=r.get("context"), activity=r.get("activity", ""),
-                                  tokens=r.get("tokens"), model=r.get("model", ""),
-                                  cost_usd=round(session_cost_usd(r), 2))
+            session = _sessions[sid]
+            session["status"] = status
+            # Fallback discovery does not have hooks, but it does have useful
+            # identity metadata. Do not erase it on a later sparse observation.
+            for key in ("started", "ts", "cwd", "context", "activity", "tokens", "model", "title", "source", "tracking_health"):
+                if key in r:
+                    session[key] = r[key]
+                elif key not in session:
+                    session[key] = "" if key in ("cwd", "activity", "model", "title", "source") else None
+            if "tokens" in r:
+                session["cost_usd"] = round(session_cost_usd(r), 2)
+            elif "cost_usd" not in session:
+                session["cost_usd"] = None
         before = _key(_snapshot)
         snapshot = _rebuild()
         return snapshot if _key(snapshot) != before else None
@@ -522,7 +550,8 @@ def _key(snapshot: list[dict]) -> list[tuple]:
     context window that moved by another five percent does. Cost is bucketed to
     whole dollars: it creeps up on every tool call, and a repaint per cent
     would be an event storm for a number nobody watches that closely."""
-    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", ""), (context_percent(s) or 0) // 5,
+    return [(s["id"], s["agent"], s["slot"], s["status"], s.get("label", ""), s.get("title", ""),
+             s.get("cwd", ""), s.get("tracking_health", ""), (context_percent(s) or 0) // 5,
              s.get("activity", ""), int(s.get("cost_usd") or 0))
             for s in snapshot]
 
@@ -618,9 +647,51 @@ class AgentIntegration(Integration):
         hooked = {sid: r["status"] for sid, r in self._records.items() if r.get("agent", "claude") == self.agent}
         try:
             truth = self.truth(hooked)
+            fallback = getattr(self, "_fallback_records", {})
+            self._records = {sid: {**fallback.get(sid, {}), **record} for sid, record in self._records.items()} | {
+                sid: record for sid, record in fallback.items() if sid not in self._records}
+            self._tracking_health = "ok"
         except Exception:
-            truth = {}
-        statuses = prune_gone(session_statuses(hooked, truth), truth, self._records)
+            # An unreadable local tracker is not evidence every tab finished.
+            # Keep the last visible snapshot until the next successful poll.
+            truth = {s["id"]: s["status"] in (RUNNING, INPUT) for s in self.sessions}
+            self._tracking_health = "unavailable"
+            for s in self.sessions:
+                self._records.setdefault(s["id"], {"tracking_health": "unavailable"})
+        statuses = prune_gone(session_statuses(hooked, truth, self._records, getattr(self, "_fallback_records", {})),
+                              truth, self._records)
+        dismissal_updates: list[tuple[str, str, str | None]] = []
+        with _latest_lock:
+            for sid in list(_dismissed):
+                if sid not in statuses:
+                    del _dismissed[sid]
+                    dismissal_updates.append((sid, "", None))
+                    continue
+                previous = _dismissed[sid]
+                current = statuses[sid]
+                cwd = str(self._records.get(sid, {}).get("cwd") or "")
+                if previous == DONE and current == RUNNING:
+                    del _dismissed[sid]  # a completed task has begun a new turn
+                    dismissal_updates.append((sid, cwd, None))
+                else:
+                    _dismissed[sid] = current
+                    dismissal_updates.append((sid, cwd, current))
+                    del statuses[sid]
+            # A daemon restart retains just this marker in slots.json. Load it
+            # lazily so ordinary visible sessions never write extra state.
+            for sid in list(statuses):
+                if sid in _dismissed:
+                    continue
+                cwd = str(self._records.get(sid, {}).get("cwd") or "")
+                marker = slots.pinned(sid, cwd).get("dismissed_status")
+                if marker in PRIORITY:
+                    if marker == DONE and statuses[sid] == RUNNING:
+                        dismissal_updates.append((sid, cwd, None))
+                    else:
+                        _dismissed[sid] = marker
+                        del statuses[sid]
+        for sid, cwd, marker in dismissal_updates:
+            slots.remember(sid, cwd, dismissed_status=marker)
         for sid in set(hooked) - set(statuses):  # tab is gone: stop reading its file every tick
             forget_session(sid)
         return statuses
@@ -646,11 +717,18 @@ class AgentIntegration(Integration):
     def _poll(self) -> None:
         statuses = self.current_sessions()
         first = self._status is None
+        before = {s["id"]: s["status"] for s in self.sessions}
         self._poll_status(aggregate(statuses.values()))
         snapshot = _update_sessions(self.agent, statuses, getattr(self, "_records", {}))
         if first and snapshot is None:
             snapshot = all_sessions()  # nothing open yet: still settle the zones (idle color) at startup
         if snapshot is not None:  # after agents.status, so per-zone rules win on the same device
+            if not first:
+                for session in snapshot:
+                    previous = before.get(session["id"])
+                    if previous is not None and previous != session["status"]:
+                        self.emit(Event(_SESSION_TRANSITION[session["status"]], self.agent,
+                                        {"agent": self.agent, "session_id": session["id"], "status": session["status"]}))
             self.emit(Event("agents.sessions", self.agent,
                             {"status": aggregate(s["status"] for s in snapshot), "sessions": snapshot}))
 

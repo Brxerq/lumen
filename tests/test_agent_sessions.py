@@ -134,6 +134,69 @@ def test_codex_rollout_fallback(tmp_path):
     assert codex.turn_open(busy) is True
 
 
+def test_codex_keeps_quiet_roots_and_excludes_internal_workers(tmp_path):
+    db = tmp_path / "state.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute("create table threads (id text, rollout_path text, archived int, updated_at_ms int, cwd text, title text, source text)")
+    now = time.time()
+
+    def add(tid, age, source="vscode", updated_age=0):
+        rollout = tmp_path / f"{tid}.jsonl"
+        # Payload order is intentionally different from Codex's usual output.
+        rollout.write_text("\n".join(json.dumps(entry) for entry in [
+            {"payload": {"id": tid}, "type": "session_meta"},
+            {"payload": {"type": "task_started"}, "type": "event_msg"},
+        ]) + "\n")
+        os.utime(rollout, (now - age, now - age))
+        conn.execute("insert into threads values (?, ?, 0, ?, ?, ?, ?)",
+                     (tid, str(rollout), int((now - updated_age) * 1000), "C:/project", f"{tid} title", source))
+
+    add("fresh", 5)
+    add("quiet-a", codex.ACTIVE_WINDOW_S + 1)
+    add("quiet-b", codex.ACTIVE_WINDOW_S + 600)
+    add("worker", 5, '{"subagent":{"thread_spawn":{}}}')
+    add("guardian", 5, '{"subagent":{"other":"guardian"}}')
+    conn.commit()
+    conn.close()
+
+    metadata = {}
+    assert codex.rollout_states(db, now=now, metadata=metadata) == {"fresh": True, "quiet-a": True, "quiet-b": True}
+    assert metadata["quiet-a"]["cwd"] == "C:/project"
+    assert metadata["quiet-a"]["title"] == "quiet-a title"
+
+    # Once a root is observed, its quiet database row remains eligible on later
+    # polls; `hooked` models the tracker's bounded known-root set here.
+    conn = sqlite3.connect(db)
+    conn.execute("update threads set updated_at_ms = ? where id = 'quiet-a'", (int((now - codex.ACTIVE_WINDOW_S - 1) * 1000),))
+    conn.commit()
+    conn.close()
+    assert codex.rollout_states(db, now=now, hooked=["quiet-a"])["quiet-a"] is True
+
+
+def test_codex_turn_parser_ignores_foreign_history_segment(tmp_path):
+    rollout = tmp_path / "rollout.jsonl"
+    entries = [
+        {"type": "session_meta", "payload": {"id": "current"}},
+        {"type": "event_msg", "payload": {"type": "task_started"}},
+        {"type": "session_meta", "payload": {"id": "historical"}},
+        {"type": "event_msg", "payload": {"type": "task_complete"}},
+    ]
+    rollout.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    assert codex.turn_open(rollout, "current") is True
+
+
+def test_codex_rollout_read_failure_is_not_an_empty_observation(tmp_path):
+    db = tmp_path / "state.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute("create table threads (id text, rollout_path text, archived int, updated_at_ms int)")
+    conn.execute("insert into threads values ('missing', ?, 0, ?)", (str(tmp_path / "missing.jsonl"), int(time.time() * 1000)))
+    conn.commit()
+    conn.close()
+    import pytest
+    with pytest.raises(codex.TrackingUnavailable):
+        codex.rollout_states(db)
+
+
 def test_claude_transcript_fallback(tmp_path):
     home = tmp_path
     (home / "sessions").mkdir()
@@ -186,14 +249,17 @@ def test_agent_integration_emits_transitions(monkeypatch):
     assert [[s["status"] for s in e.data["sessions"]] for e in per_tab] == [[], [RUNNING], [INPUT], [DONE]]
     assert [e.data["status"] for e in per_tab] == [DONE, RUNNING, INPUT, DONE]
     assert per_tab[1].data["sessions"] == [{"id": "s1", "agent": "claude", "slot": 0, "label": "", "status": RUNNING,
-                                            "started": None, "ts": None, "cwd": "", "context": None,
-                                            "activity": "", "tokens": None, "model": "", "cost_usd": 0.0}]
+                                                "started": None, "ts": None, "cwd": "", "context": None,
+                                                "activity": "", "tokens": None, "model": "", "title": "", "source": "",
+                                                "tracking_health": None, "cost_usd": None}]
     types = [(e.type, e.data.get("status")) for e in events if e.type != "agents.sessions"]
     # first poll settles the aggregate without a per-agent flash; then each change emits both
     assert types == [("agents.status", "done"),
                      ("agent.running", "running"), ("agents.status", "running"),
                      ("agent.needs_input", "input"), ("agents.status", "input"),
-                     ("agent.finished", "done"), ("agents.status", "done")]
+                     ("agent.session.needs_input", "input"),
+                     ("agent.finished", "done"), ("agents.status", "done"),
+                     ("agent.session.finished", "done")]
 
 
 def test_session_slots_are_sticky_across_agents(tmp_path):
@@ -201,20 +267,20 @@ def test_session_slots_are_sticky_across_agents(tmp_path):
     rec = lambda started, cwd="": {"started": started, "cwd": cwd}
     snap = ag._update_sessions("claude", {"b": RUNNING, "a": DONE}, {"a": rec(1, "C:/x"), "b": rec(2)})
     assert [(s["id"], s["slot"], s["cwd"]) for s in snap] == [("b", 0, ""), ("a", 1, "C:/x")]  # b started last
-    snap = ag._update_sessions("codex", {"c": INPUT}, {})                   # a newcomer takes zone 0
-    assert [(s["id"], s["slot"]) for s in snap] == [("c", 0), ("b", 1), ("a", 2)]
+    snap = ag._update_sessions("codex", {"c": INPUT}, {})                   # a newcomer uses the next free zone
+    assert [(s["id"], s["slot"]) for s in snap] == [("b", 0), ("a", 1), ("c", 2)]
     assert ag._update_sessions("codex", {"c": INPUT}, {}) is None          # nothing changed
-    snap = ag._update_sessions("claude", {"b": DONE, "d": RUNNING}, {})     # a ended; d opens on zone 0
-    assert [(s["id"], s["slot"], s["status"]) for s in snap] == [("d", 0, RUNNING), ("c", 1, INPUT), ("b", 2, DONE)]
-    assert [s["id"] for s in ag.all_sessions()] == ["d", "c", "b"]
+    snap = ag._update_sessions("claude", {"b": DONE, "d": RUNNING}, {})     # a ended; d fills its free zone
+    assert [(s["id"], s["slot"], s["status"]) for s in snap] == [("b", 0, DONE), ("d", 1, RUNNING), ("c", 2, INPUT)]
+    assert [s["id"] for s in ag.all_sessions()] == ["b", "d", "c"]
     # idle sessions known only from the agent's record (no hook file) take no zone until they work,
     # then keep it: Claude Desktop keeps every old tab's process alive
     snap = ag._update_sessions("claude", {"b": DONE, "d": RUNNING, "e": DONE, "f": DONE}, {})
     assert snap is None and "e" not in ag._sessions
     snap = ag._update_sessions("claude", {"b": DONE, "d": RUNNING, "e": RUNNING, "f": DONE}, {})
-    assert [(s["id"], s["slot"]) for s in snap] == [("e", 0), ("d", 1), ("c", 2), ("b", 3)]
+    assert [(s["id"], s["slot"]) for s in snap] == [("b", 0), ("d", 1), ("c", 2), ("e", 3)]
     snap = ag._update_sessions("claude", {"b": DONE, "d": RUNNING, "e": DONE, "f": DONE}, {})
-    assert [(s["id"], s["status"]) for s in snap][0] == ("e", DONE)
+    assert [(s["id"], s["status"]) for s in snap][-1] == ("e", DONE)
     # hook files keep `started` and cwd, and can be forgotten from the dashboard
     ev = {"hook_event_name": "UserPromptSubmit", "session_id": "s9", "cwd": "C:/proj"}
     ag.apply_hook(ev, tmp_path, now=10.0)
@@ -223,6 +289,24 @@ def test_session_slots_are_sticky_across_agents(tmp_path):
     assert (r["started"], r["ts"], r["cwd"], r["status"]) == (10.0, 20.0, "C:/proj", DONE)
     assert ag.forget_session("s9", tmp_path) and not ag.forget_session("s9", tmp_path)
     assert ag.read_sessions(tmp_path, now=21.0) == {}
+
+
+def test_dismiss_hides_fallback_only_session_until_next_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("LUMEN_HOME", str(tmp_path))
+    ag._sessions.clear()
+    ag._snapshot.clear()
+    ag._dismissed.clear()
+    integ = ag.AgentIntegration(lambda e: None, {})
+    integ.agent = "codex"
+    states = iter([{"task": True}, {"task": True}, {"task": False}, {"task": True}])
+    integ.truth = lambda hooked: next(states)
+
+    assert integ.current_sessions() == {"task": RUNNING}
+    ag._update_sessions("codex", {"task": RUNNING}, {})
+    assert ag.forget_session("task")
+    assert integ.current_sessions() == {}
+    assert integ.current_sessions() == {}
+    assert integ.current_sessions() == {"task": RUNNING}
 
 
 def test_context_window_comes_from_the_transcripts_last_usage(tmp_path):

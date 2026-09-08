@@ -209,6 +209,26 @@ def test_engine_replays_base_colors_onto_new_devices(tmp_path):
     engine.stop()
 
 
+def test_engine_replays_every_persistent_action_from_one_rule(tmp_path):
+    from lumen.core.engine import Engine
+
+    red, blue = FakeLight("red"), FakeLight("blue")
+    found = []
+    engine = Engine(Config(tmp_path / "config.json"), integrations=[], discover=lambda s: list(found))
+    engine.config.set_rules([Rule(id="both", when="status", actions=[
+        Action(device="red", effect="set", color=(255, 0, 0)),
+        Action(device="blue", effect="set", color=(0, 0, 255)),
+    ])])
+    engine.start()
+    engine.emit("status")
+    engine.reapply()
+    found.extend([red, blue])
+    engine.scan()
+    assert red.colors[-1] == (255, 0, 0)
+    assert blue.colors[-1] == (0, 0, 255)
+    engine.stop()
+
+
 def test_engine_reapplies_edited_rules_immediately(tmp_path):
     from lumen.core.engine import Engine
     light = FakeLight("light")

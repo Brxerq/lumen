@@ -1,7 +1,7 @@
 /* Lumen dashboard — vanilla JS, no build step. Talks to the local JSON API. */
 "use strict";
 
-const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null };
+const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, request: 0, pendingRender: false };
 const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 255, 0] };
 const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
@@ -71,7 +71,10 @@ async function api(method, path, body) {
     clearTimeout(deadline);
   }
 }
-function closeMenus() { document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open")); }
+function closeMenus(flush = true) {
+  document.querySelectorAll(".menu-wrap.open").forEach(m => m.classList.remove("open"));
+  if (flush) flushPendingRender();
+}
 function toast(text, err) {
   const el = document.createElement("div");
   el.className = "toast" + (err ? " err" : "");
@@ -86,19 +89,37 @@ async function act(fn, ok) {
 
 // ---------- state ----------
 async function refresh() {
+  const request = ++S.request;
+  let state = S.state, error = null;
   try {
-    S.state = await api("GET", "/api/state");
-    S.error = null;
+    state = await api("GET", "/api/state");
   } catch (e) {
-    S.error = e.message;
+    error = e.message;
   }
+  // Streams and the fallback poll can overlap. An older response must never
+  // replace state that a newer response already displayed.
+  if (request !== S.request) return;
+  S.state = state;
+  S.error = error;
   // Re-render only when something visible changed, and never while a menu is open
   // (a rebuild would close it under the cursor). The sidebar clock updates regardless.
   const st = S.state;
   const sig = st && JSON.stringify([S.page, S.feed, st.devices, st.integrations, st.rules, st.presets, st.activity, st.messages, st.paused, st.scanning, st.settings, st.onboarded, st.sessions, st.forgotten_devices, st.quiet_now, S.error]);
-  if (sig === S.sig || document.querySelector(".menu-wrap.open")) { S.quiet++; renderSidebar(); return; }
+  if (sig === S.sig) { S.quiet++; renderSidebar(); return; }
+  if (refreshBlocked()) { S.pendingRender = true; S.quiet++; renderSidebar(); return; }
   S.quiet = 0;
   S.sig = sig;
+  render();
+}
+function refreshBlocked() {
+  const active = document.activeElement;
+  return !!(document.querySelector(".menu-wrap.open") || (active && $("#main")?.contains(active) && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)));
+}
+function flushPendingRender() {
+  if (!S.pendingRender || refreshBlocked()) return;
+  S.pendingRender = false;
+  S.quiet = 0;
+  S.sig = null;
   render();
 }
 // A switch that says what it is to a screen reader, not just a coloured pill.
@@ -243,7 +264,11 @@ function zoneLayout(st) {
     for (const a of r.actions) {
       if (a.effect !== "sessions") continue;
       for (const d of st.devices) {
-        if (a.device !== "*" && a.device !== d.id) continue;
+        const wildcard = ["*", "all", ""].includes(a.device);
+        if (!wildcard && a.device !== d.id) continue;
+        // EffectPlayer sends wildcard persistent session colors only to ambient
+        // devices. Keep the layout preview honest for screen/glow adapters.
+        if (wildcard && !d.ambient) continue;
         if (!d.connected || d.details.enabled === false) continue;
         agentOf.set(d.id, a.agent || "");
         // Whole-device layout, or nowhere to put a second tab: one colour for the lot.
@@ -281,8 +306,13 @@ function deviceAgent(st, id) {
   return act ? (act.agent || "") : "off";
 }
 function deviceSessionAction(st, id) {
-  const acts = pick => st.rules.filter(r => r.enabled).flatMap(r => r.actions).filter(a => a.effect === "sessions" && pick(a.device));
-  return acts(d => d === id)[0] || acts(d => d === "*" || d === "all" || d === "")[0] || null;
+  const device = deviceById(id);
+  const actions = st.rules.filter(r => r.enabled).flatMap(r => r.actions).filter(a => {
+    if (a.effect !== "sessions") return false;
+    const wildcard = ["*", "all", ""].includes(a.device);
+    return a.device === id || (wildcard && device?.ambient);
+  });
+  return actions.at(-1) || null; // EffectPlayer applies matching actions in rule order.
 }
 // A device with zones can give each tab one, or show a single colour for all of
 // them. Without this on the Devices page the choice is buried in the automation
@@ -291,7 +321,7 @@ function deviceLayout(st, id) {
   const act = deviceSessionAction(st, id);
   return act ? act.per_zone !== false : true;
 }
-const sessionName = s => s.label || basename(s.cwd) || ((s.agent === "codex" ? "Codex" : "Claude") + " tab");
+const sessionName = s => s.label || basename(s.cwd) || s.title || ((s.agent === "codex" ? "Codex" : "Claude") + " tab");
 
 // The live board is the point of the whole app: what colour is on the hardware
 // this second. Big, on its own, above everything else.
@@ -370,6 +400,7 @@ function sessionList(st) {
     // the on-zone / off-zone boundary, so only the real ends are dead ends.
     const i = sess.indexOf(s);
     const name = sessionName(s);
+    const editName = s.label || basename(s.cwd) || "";
     const lit = zoneColor(s.id);
     const placed = onZoneIds.has(s.id);
     const sharing = foldedIds.get(s.id);
@@ -379,7 +410,7 @@ function sessionList(st) {
       <span class="slot ${placed || sharing ? h(s.status) : "unplaced"}" title="${placed ? `Tab ${i + 1}, left to right on your devices`
       : sharing ? `Shown on ${deviceById(sharing)?.name || sharing}, in one colour with the other tabs` : `Tab ${i + 1}. Every zone is taken by a tab further up`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${i + 1}</span>
       <div class="row-main">
-        <div class="row-title"><input class="name-edit" value="${h(name)}" aria-label="Name for this tab"
+        <div class="row-title"><input class="name-edit" value="${h(editName)}" placeholder="${h(name)}" aria-label="Name for this tab"
           title="Rename this tab" onchange="L.labelSession('${js(s.id)}', this.value)"></div>
         <div class="row-sub">${h(s.agent)} · ${s.started ? "open for " + ago(s.started) : "tracked from the agent's own record"}${s.ts ? " · updated " + ago(s.ts) + " ago" : ""}</div>
         ${s.cwd ? `<div class="row-sub tech" title="${h(s.cwd)}">${h(shortPath(s.cwd))}</div>` : ""}</div>
@@ -843,8 +874,8 @@ const L = window.L = {
   // below — which is what left the last device's Test menu a sliver in setup.
   menu(btn) {
     const wrap = btn.parentElement, open = wrap.classList.contains("open");
-    closeMenus();
-    if (open) return;
+    closeMenus(false);
+    if (open) { flushPendingRender(); return; }
     wrap.classList.add("open");
     const menu = wrap.querySelector(".menu"), at = btn.getBoundingClientRect();
     const room = innerHeight - at.bottom - 16 >= menu.offsetHeight;
@@ -1124,6 +1155,7 @@ addEventListener("resize", closeMenus);
 // used to leave you on the same page.
 window.addEventListener("hashchange", () => { S.page = location.hash.slice(1) || "dashboard"; document.activeElement?.blur?.(); if (S.draft) L.closeModal(); render(); pollSoon(); });
 document.addEventListener("click", e => { if (!e.target.closest(".menu-wrap")) closeMenus(); });
+document.addEventListener("focusout", () => setTimeout(flushPendingRender));
 applyTheme(currentTheme());
 S.page = location.hash.slice(1) || "dashboard";
 poll();

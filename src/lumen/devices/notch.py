@@ -258,10 +258,21 @@ def session_rows(sessions: list[dict]) -> list[tuple[str, str, str, int | None, 
     for s in rows:
         cost = s.get("cost_usd")
         out.append((str(s.get("agent", "agent")),
-                    str(s.get("label") or paths.basename(str(s.get("cwd") or "")) or "~"),
+                    str(s.get("label") or paths.basename(str(s.get("cwd") or "")) or s.get("title") or "~"),
                     str(s.get("status")), context_percent(s), str(s.get("activity") or ""),
                     float(cost) if isinstance(cost, (int, float)) else None))
     return out
+
+
+def visible_sessions(sessions: list[dict], options: dict) -> list[dict]:
+    """The session records represented by the visible rows, in row order."""
+    raw_show = options.get("show")
+    show: dict = raw_show if isinstance(raw_show, dict) else {}
+    if not bool(show.get("sessions", True)):
+        return []
+    agent = str(options.get("agents") or "all")
+    return [s for s in sorted(sessions, key=lambda s: int(s.get("slot", 0)))
+            if agent == "all" or s.get("agent") == agent]
 
 
 def tab_x(screen_w: int, tab_w: int, position: str, offset: int = -1, margin: int = 24) -> int:
@@ -556,6 +567,8 @@ def focus_pid(pid: int) -> bool:
 
 def focus_session(session: dict) -> bool:
     """Click on a row: raise the terminal that tab lives in. Codex has no pid file we know of, so only Claude."""
+    if session.get("agent") == "codex":
+        return False
     pid = session_pids().get(str(session.get("id", "")))
     if pid is None:
         return False
@@ -720,9 +733,8 @@ def run_child() -> int:
             hide()
             return
         flags = {**SHOW_DEFAULTS, **(opts.get("show") if isinstance(opts.get("show"), dict) else {})}
-        rows = apply_show(session_rows(state["sessions"]), flags, str(opts.get("agents") or "all"))
-        if not flags.get("sessions", True):
-            rows = []
+        shown_sessions = visible_sessions(state["sessions"], opts)
+        rows = apply_show(session_rows(shown_sessions), flags)
         usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"))
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in rows] if len(rows) == len(runs(zones)) else None
@@ -756,15 +768,16 @@ def run_child() -> int:
                 root.after(16, animate)
 
     def clicked(event):
-        rows = session_rows(state["sessions"])
-        if not state["hover"] or not rows:
+        sessions = visible_sessions(state["sessions"], state["options"])
+        if not state["hover"] or not sessions:
             return
         y = event.y if position() != "bottom" else event.y  # the image is not mirrored, only anchored
-        i = panel_row_at(int(y), len(rows), SIZES[size()][0])
+        i = panel_row_at(int(y), len(sessions), SIZES[size()][0])
         if i is None:
             return
-        ordered = sorted(state["sessions"], key=lambda s: int(s.get("slot", 0)))
-        threading.Thread(target=focus_session, args=(ordered[i],), daemon=True).start()
+        session = sessions[i]
+        if session.get("agent") == "claude":
+            threading.Thread(target=focus_session, args=(session,), daemon=True).start()
 
     # Drag the tab along its edge to put it anywhere; letting go saves the spot
     # through the dashboard's settings API, so it is back there next start.

@@ -46,7 +46,9 @@ class Engine:
         self._integration_classes = integrations if integrations is not None else integration_classes()
         self._discover = discover
         self.activity: deque[dict] = deque(maxlen=200)   # events + which rules fired
-        self._persistent: dict[str, tuple[Action, Event]] = {}  # last `set`/`off` per rule, replayed on new devices
+        # Every persistent action needs its own entry. A rule can set different
+        # devices (or a sessions view and a base colour) in one firing.
+        self._persistent: dict[tuple[str, int], tuple[Action, Event]] = {}
         self._last_event: dict[str, Event] = {}  # newest event of each type, replayed when a rule changes
         self.messages: deque[dict] = deque(maxlen=50)    # engine notes for the dashboard
         self.started_at = time.time()
@@ -268,11 +270,10 @@ class Engine:
         for rule in self.config.rules:
             if rule.matches(event):
                 fired.append(rule.name or rule.id)
-                for action in rule.actions:
+                for index, action in enumerate(rule.actions):
                     self.player.run(action, event)
                     if EFFECTS.get(action.effect, {}).get("persistent"):
-                        self._persistent.pop(rule.id, None)
-                        self._persistent[rule.id] = (action, event)  # newest last
+                        self._persistent[(rule.id, index)] = (action, event)
         self.activity.append({**event.to_dict(), "rules": fired})
         self.bump()
         if self.config.settings.get("log_events"):
@@ -283,17 +284,18 @@ class Engine:
         its kind. Without this an edited rule sits dark until the next event
         happens to arrive, which for an idle agent can be hours — the dashboard
         control looks broken when it worked perfectly."""
+        persistent: dict[tuple[str, int], tuple[Action, Event]] = {}
         for rule in self.config.rules:
             if not rule.enabled:
                 continue
             for event in list(self._last_event.values()):
                 if not rule.matches(event):
                     continue
-                for action in rule.actions:
+                for index, action in enumerate(rule.actions):
                     if EFFECTS.get(action.effect, {}).get("persistent"):
                         self.player.run(action, event)
-                        self._persistent.pop(rule.id, None)
-                        self._persistent[rule.id] = (action, event)
+                        persistent[(rule.id, index)] = (action, event)
+        self._persistent = persistent
         self.bump()
 
     def clear_activity(self) -> None:

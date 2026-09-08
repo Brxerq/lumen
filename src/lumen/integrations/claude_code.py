@@ -87,7 +87,8 @@ class ClaudeCode(AgentIntegration):
     agent = "claude"
     name = "Claude Code"
     description = "Anthropic's coding agent — CLI, VS Code, Cursor, JetBrains, desktop app."
-    events = ("agent.running", "agent.needs_input", "agent.finished", "agents.status", "claude.usage")
+    events = ("agent.running", "agent.needs_input", "agent.finished", "agent.session.running", "agent.session.needs_input",
+              "agent.session.finished", "agents.status", "claude.usage")
     hooks_file = CLAUDE_HOME / "settings.json"
     hooks = CLAUDE_HOOKS
     docs = ("Connect installs a hook command in `~/.claude/settings.json` that reports each session's "
