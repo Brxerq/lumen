@@ -309,6 +309,33 @@ def test_dismiss_hides_fallback_only_session_until_next_turn(tmp_path, monkeypat
     assert integ.current_sessions() == {"task": RUNNING}
 
 
+def test_other_agent_poll_preserves_dismissal_across_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("LUMEN_HOME", str(tmp_path))
+    monkeypatch.setattr(ag, "_sessions", {})
+    monkeypatch.setattr(ag, "_snapshot", [])
+    monkeypatch.setattr(ag, "_dismissed", {})
+    codex = ag.AgentIntegration(lambda e: None, {})
+    codex.agent = "codex"
+    codex.truth = lambda hooked: {"task": True}
+    claude = ag.AgentIntegration(lambda e: None, {})
+    claude.agent = "claude"
+    claude.truth = lambda hooked: {"other": True}
+    ag._update_sessions("codex", codex.current_sessions(), {})
+    assert ag.forget_session("task")
+
+    assert claude.current_sessions() == {"other": RUNNING}
+    assert ag.slots.pinned("task")["dismissed_status"] == RUNNING
+    assert codex.current_sessions() == {}
+    ag._dismissed.clear()  # simulate a daemon restart loading the persisted marker
+    assert codex.current_sessions() == {}
+    codex.truth = lambda hooked: {"task": False}
+    assert codex.current_sessions() == {}
+    assert claude.current_sessions() == {"other": RUNNING}
+    codex.truth = lambda hooked: {"task": True}
+    assert codex.current_sessions() == {"task": RUNNING}
+    assert ag.slots.pinned("task")["dismissed_status"] is None
+
+
 def test_context_window_comes_from_the_transcripts_last_usage(tmp_path):
     t = tmp_path / "t.jsonl"
     t.write_text("\n".join([

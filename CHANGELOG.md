@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.6] — 2026-09-08
+
+### Changed
+- Simplified the dashboard around live tasks, connected devices and recent activity,
+  with secondary information tucked away and clearer empty, paused and offline states.
+- Grouped Settings into everyday controls and expandable options, with updates easier to find.
+- Improved narrow-screen navigation, keyboard access and light/dark styling.
+
+### Fixed
+- Intel Macs now receive a native Intel binary during installation and updates.
+  Release and CI jobs cover both Intel and Apple Silicon.
+- Corrected the macOS keyboard-backlight discovery API name.
+- Start at login now handles installation paths containing XML special characters.
+- Mac paths retain their native separators; offline instructions use the correct launch command.
+- Self-updates on macOS and Linux handle apostrophes in installation paths and use a private temporary script.
+- More reliable active Codex session tracking and stable task placement on the status tab.
+
 ## [0.7.5] — 2026-09-07
 
 ### Changed

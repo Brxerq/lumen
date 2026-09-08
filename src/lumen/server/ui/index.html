@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lumen</title>
+<meta name="description" content="Your local control room for agent activity, lights, and automations.">
 <link rel="icon" type="image/svg+xml" href="brand/favicon.svg">
 <link rel="alternate icon" href="brand/lumen.ico">
 <link rel="apple-touch-icon" href="brand/lumen-icon-256.png">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a class="skip-link" href="#main" onclick="document.getElementById('main').focus(); return false">Skip to content</a>
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
@@ -32,8 +34,8 @@
       <span class="brand-name" role="img" aria-label="Lumen"></span>
       <span class="brand-version" id="version"></span>
     </div>
-    <nav class="nav" id="nav">
-      <a href="#dashboard" data-page="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+    <nav class="nav" id="nav" aria-label="Main navigation">
+      <a href="#dashboard" data-page="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</a>
       <a href="#devices" data-page="devices"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>Devices</a>
       <a href="#automations" data-page="automations"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Automations</a>
       <a href="#integrations" data-page="integrations"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>Integrations</a>
@@ -45,10 +47,10 @@
       <a class="foot-link" href="https://github.com/Brxerq/lumen" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
   </aside>
-  <main class="main" id="main"></main>
+  <main class="main" id="main" tabindex="-1"></main>
 </div>
 <div id="modal-root"></div>
-<div id="toast-root"></div>
+<div id="toast-root" role="status" aria-live="polite"></div>
 <script src="app.js"></script>
 </body>
 </html>

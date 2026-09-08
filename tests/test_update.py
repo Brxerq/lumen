@@ -1,8 +1,41 @@
 """Self-update: version comparison and the API's refusal paths (no network)."""
 
+import shlex
+from pathlib import Path
 from unittest import mock
 
 from lumen.app import update
+
+
+def test_unix_swapper_quotes_paths_and_uses_unique_scripts(tmp_path, monkeypatch):
+    exe = tmp_path / "Pat's $(touch injected) Lumen"
+    new = exe.with_suffix(".new")
+    monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr(update.tempfile, "gettempdir", lambda: str(tmp_path))
+    with mock.patch.object(update.subprocess, "Popen") as popen:
+        update._spawn_swapper(exe, new)
+        update._spawn_swapper(exe, new)
+    scripts = [Path(call.args[0][1]) for call in popen.call_args_list]
+    for script in scripts:
+        lines = script.read_text(encoding="utf-8").splitlines()
+        move = shlex.split(next(line for line in lines if line.startswith("mv ")))
+        assert move[:7] == ["mv", "-f", str(new), str(exe), "&&", "chmod", "+x"]
+        assert move[7] == str(exe)
+        launch = shlex.split(next(line for line in lines if "nohup " in line))
+        assert launch[1] == str(exe)
+        stop = shlex.split(next(line for line in lines if "pkill " in line))
+        assert stop == ["pkill", "-f", str(exe)]
+        assert shlex.split(lines[-1]) == ["rm", "-f", str(script)]
+    assert scripts[0] != scripts[1]
+
+
+def test_release_asset_matches_mac_architecture():
+    for machine, expected in [("arm64", "lumen-macos"), ("x86_64", "lumen-macos-x86_64"), ("unknown", "")]:
+        with mock.patch.object(update.sys, "platform", "darwin"), mock.patch("platform.machine", return_value=machine):
+            assert update._platform_asset() == expected
+    for system, expected in [("win32", "lumen.exe"), ("linux", "lumen-linux")]:
+        with mock.patch.object(update.sys, "platform", system):
+            assert update._platform_asset() == expected
 
 
 def test_version_tuple_ordering():

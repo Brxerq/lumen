@@ -36,7 +36,7 @@ def keyboard_id(client) -> int:
     Recent Apple Silicon Macs don't always number the built-in keyboard 1;
     talking to id 1 there reads back nothing and the device vanished."""
     try:
-        ids = [int(i) for i in (client.copyKeyboardBackgroundIDs() or [])]
+        ids = [int(i) for i in (client.copyKeyboardBacklightIDs() or [])]
     except Exception:
         ids = []
     return ids[0] if ids else KEYBOARD

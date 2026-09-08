@@ -53,7 +53,7 @@
 
   --radius: 14px;
   --radius-sm: 9px;
-  --sidebar: 268px;
+  --sidebar: 232px;
   --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -12px rgba(0, 0, 0, .7);
   /* The capsule of the brand mark. Two approved variants, one per surface:
      white on dark, #191C23 on light. It used to be baked into the SVG file,
@@ -108,10 +108,10 @@ body { font-variant-numeric: tabular-nums; caret-color: var(--green); }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 999px; border: 3px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
-.app { display: flex; min-height: 100vh; }
+.app { display: flex; min-height: 100vh; min-height: 100dvh; }
 
 /* ---------- sidebar ---------- */
-.sidebar { width: var(--sidebar); flex: none; border-right: 1px solid var(--border); padding: 26px 16px; display: flex; flex-direction: column; gap: 30px; position: sticky; top: 0; height: 100vh; background: var(--bg-2); }
+.sidebar { width: var(--sidebar); flex: none; border-right: 1px solid var(--border); padding: 26px 16px; display: flex; flex-direction: column; gap: 30px; position: sticky; top: 0; height: 100vh; height: 100dvh; background: var(--bg-2); }
 .brand { display: flex; align-items: center; gap: 11px; padding: 2px 10px 0; }
 .brand-mark { width: 17px; height: 30px; flex: none; display: block; }
 .brand-shell { fill: var(--brand-shell); }
@@ -131,7 +131,7 @@ body { font-variant-numeric: tabular-nums; caret-color: var(--green); }
 .foot-link:hover { color: var(--text); }
 
 /* ---------- main ---------- */
-.main { flex: 1; min-width: 0; padding: 44px 48px 96px; max-width: 1560px; }
+.main { flex: 1; min-width: 0; padding: 44px clamp(22px, 3.4vw, 56px) 96px; max-width: 1560px; margin-inline: auto; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
 .page-head h1 { font-family: var(--font-display); font-size: var(--fs-3xl); font-weight: 700; letter-spacing: -.025em; line-height: 1.12; text-wrap: balance; }
 .page-head p { color: var(--muted); margin-top: 10px; max-width: 68ch; font-size: var(--fs-md); }
@@ -150,18 +150,12 @@ body { font-variant-numeric: tabular-nums; caret-color: var(--green); }
    the agent-tab rows wrapping their own subtitles. */
 .two-col { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(360px, .9fr); gap: 30px; align-items: start; }
 
-/* The right-hand rail carries the feed and the automation summary. The left
-   column runs to whatever length the agent-tab list happens to be — twenty-odd
-   tabs is normal — so without this the rail ends a thousand pixels early and
-   the page reads as a column that ran out. Pinned, it stays beside whatever you
-   are scrolling past, and scrolls inside itself when it is the taller one. */
-/* The wheel deliberately chains: once the rail bottoms out, the page keeps
-   scrolling, so the rail is never a trap for a cursor that happens to be over it. */
-.rail { position: sticky; top: 22px; max-height: calc(100vh - 44px); overflow-y: auto; padding-right: 4px; }
+/* Keep activity in the page's scroll flow, including on trackpads. */
+.rail { min-width: 0; }
 .rail > .section:last-child { margin-bottom: 0; }
 
 /* ---------- card: the surface everything sits on ---------- */
-.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .card + .card { margin-top: 14px; }
 .card-pad { padding: 22px 26px; }
 
@@ -439,8 +433,57 @@ select.input.sm { padding-right: 26px; background-position: right 8px center; ba
 kbd { font-family: var(--mono); font-size: var(--fs-xs); background: var(--panel-2); border: 1px solid var(--border-2); border-bottom-width: 2px; padding: 3px 8px; border-radius: 6px; }
 
 /* ---------- responsive ---------- */
-/* Below this the rail has no column to sit beside, so it goes back to normal
-   flow — a pinned, inner-scrolling block in a single-column page is a trap. */
+.skip-link { position: fixed; top: 12px; left: 12px; z-index: 100; padding: 12px 20px; background: var(--panel); border: 1px solid var(--green); border-radius: 8px; transform: translateY(-160%); }
+.skip-link:focus { transform: none; }
+.dashboard-head { align-items: center; margin-bottom: 28px; }
+.eyebrow { display: block; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 9px; }
+.overview { margin-bottom: 0; }
+.overview .hero { padding: 24px; gap: 18px; background: var(--panel); }
+.overview .hero-text { min-width: 0; flex-basis: 280px; }
+.overview .hero-text b { font-size: 23px; letter-spacing: -.025em; }
+.overview .hero-text > span { max-width: 58ch; margin-top: 8px; }
+.overview .hero-actions { flex-wrap: wrap; }
+.overview .hero-orb { width: 38px; height: 38px; }
+.overview .hero-orb i { width: 10px; height: 10px; box-shadow: none; animation: none; }
+.overview-links { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 17px 2px 30px; color: var(--muted); font-size: var(--fs-sm); }
+.overview-links a { display: inline-flex; align-items: center; gap: 9px; }
+.overview-links a:hover { color: var(--text); }
+.disclosure { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; }
+.disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 24px; cursor: pointer; list-style: none; font-weight: 600; }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::after { content: "+"; color: var(--muted); font-size: 22px; font-weight: 400; }
+.disclosure[open] > summary::after { content: "−"; }
+.disclosure[open] > summary { border-bottom: 1px solid var(--border); }
+.disclosure > summary:hover { color: var(--green-ink); }
+.disclosure > summary small { display: block; font-weight: 400; font-size: var(--fs-sm); color: var(--muted); margin-top: 3px; }
+.disclosure-body { padding: 20px 24px; }
+.disclosure-body .section:last-child { margin-bottom: 0; }
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 28px; align-items: start; }
+.settings-basics, .settings-extras { min-width: 0; }
+.settings-extras .setting { align-items: flex-start; flex-direction: column; gap: 12px; }
+.settings-extras .ctl, .setting .input { max-width: 100%; }
+.setting .desc b { font-size: var(--fs-md); }
+.setting .desc span { display: block; line-height: 1.5; }
+.setting .ctl { min-width: 0; }
+.setting .inline { flex-wrap: wrap; }
+.setting .check { white-space: normal; }
+.quiet-schedule { border-top: 1px solid var(--border); }
+.quiet-schedule > summary { padding: 16px 24px; cursor: pointer; color: var(--muted); font-size: var(--fs-sm); }
+.quiet-schedule > summary:hover { color: var(--text); }
+.settings-about { border-top: 1px solid var(--border); padding-top: 24px; margin-top: 12px; }
+@media (max-width: 1200px) {
+  .settings-layout { grid-template-columns: 1fr; gap: 0; }
+  .settings-extras { margin-bottom: 24px; }
+  .settings-extras .setting { flex-direction: row; align-items: center; }
+}
+.dashboard-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 20px; margin: -16px 0 30px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: var(--panel-2); font-size: var(--fs-sm); }
+.dashboard-notice a { margin-left: auto; text-decoration: underline; text-underline-offset: 3px; }
+.board-label { flex-wrap: wrap; }
+.row.session { flex-wrap: wrap; }
+.row.session .row-main { min-width: 150px; }
+.row.session .row-actions { margin-left: auto; }
+
+/* Stack the activity below sessions when the columns become too narrow. */
 @media (max-width: 1180px) {
   .two-col { grid-template-columns: 1fr; }
   .rail { position: static; max-height: none; overflow: visible; padding-right: 0; }
@@ -459,6 +502,37 @@ kbd { font-family: var(--mono); font-size: var(--fs-xs); background: var(--panel
   .daemon { justify-content: center; padding: 10px 0; }
   .row, .rule, .setting, .integ, .feed-item, .card-pad, .rows-note { padding-left: 18px; padding-right: 18px; }
   .board { padding: 20px; }
+}
+
+@media (max-width: 600px) {
+  .app { flex-direction: column; }
+  .sidebar { position: static; width: 100%; height: auto; padding: 18px 16px 0; gap: 16px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .brand { padding: 0 4px; }
+  .brand-name, .brand-version { display: block; }
+  .nav { flex-direction: row; gap: 4px; overflow-x: auto; padding: 0 0 10px; }
+  .nav a { flex: none; font-size: var(--fs-sm); padding: 10px 12px; gap: 8px; }
+  .nav a svg { width: 18px; height: 18px; }
+  .nav a.active::before { display: none; }
+  .sidebar-foot { display: none; }
+  .main { width: 100%; padding: 28px 16px 56px; }
+  .dashboard-head { gap: 18px; }
+  .dashboard-head > .btn { align-self: flex-start; }
+  .overview .hero { padding: 24px 20px; gap: 16px; }
+  .overview .hero-orb { display: none; }
+  .overview .hero-actions { flex-direction: row; flex-wrap: wrap; flex: 1 1 100%; }
+  .overview .hero-actions .btn { flex: 1; }
+  .section-head { gap: 8px; flex-wrap: wrap; }
+  .row.session { gap: 10px; }
+  .row.session .row-actions { flex-basis: 100%; justify-content: flex-end; }
+  .row.session .row-actions .pill { margin-right: auto; }
+  .row.session .row-actions .btn { min-width: 40px; min-height: 40px; }
+  .board { padding: 16px; }
+  .board-legend { gap: 8px 14px; }
+  .dashboard-notice a { margin-left: 20px; }
+  .setting, .settings-extras .setting { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .setting .ctl { width: 100%; }
+  .setting .ctl > .input { width: 100%; }
+  .disclosure > summary, .disclosure-body { padding: 18px; }
 }
 
 /* Reduced motion: the looping decoration stops, the signals do not. The spinner
@@ -481,7 +555,7 @@ kbd { font-family: var(--mono); font-size: var(--fs-xs); background: var(--panel
 
 /* --- feed filters --------------------------------------------------------- */
 .filters { display: flex; gap: 7px; flex-wrap: wrap; margin: -2px 0 12px; }
-.chip-btn { min-height: 32px; padding: 5px 13px; border-radius: 999px; border: 1px solid var(--border-2); background: transparent;
+.chip-btn { min-height: 32px; padding: 5px 13px; border-radius: 7px; border: 1px solid var(--border-2); background: transparent;
   color: var(--muted); font-size: var(--fs-sm); cursor: pointer; transition: color .12s, background .12s, border-color .12s; }
 .chip-btn:hover { color: var(--text); background: var(--panel-2); }
 .chip-btn.on { color: var(--text); background: var(--panel-3); border-color: var(--dim); font-weight: 600; }

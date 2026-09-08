@@ -664,8 +664,7 @@ class AgentIntegration(Integration):
         with _latest_lock:
             for sid in list(_dismissed):
                 if sid not in statuses:
-                    del _dismissed[sid]
-                    dismissal_updates.append((sid, "", None))
+                    # Another agent's poll cannot reset this task's dismissal.
                     continue
                 previous = _dismissed[sid]
                 current = statuses[sid]

@@ -3,6 +3,7 @@ XDG autostart entry on Linux. No admin rights needed anywhere."""
 
 from __future__ import annotations
 
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -46,7 +47,7 @@ def set_enabled(value: bool) -> None:
         file.unlink(missing_ok=True)
         return
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(_plist() if sys.platform == "darwin" else _desktop())
+    file.write_text(_plist() if sys.platform == "darwin" else _desktop(), encoding="utf-8")
 
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -59,14 +60,8 @@ def _unix_file() -> Path:
 
 
 def _plist() -> str:
-    args = "".join(f"    <string>{a}</string>\n" for a in command())
-    return ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-            "<plist version=\"1.0\"><dict>\n"
-            "  <key>Label</key><string>com.lumen.daemon</string>\n"
-            f"  <key>ProgramArguments</key><array>\n{args}  </array>\n"
-            "  <key>RunAtLoad</key><true/>\n"
-            "</dict></plist>\n")
+    return plistlib.dumps({"Label": "com.lumen.daemon", "ProgramArguments": command(),
+                          "RunAtLoad": True}).decode("utf-8")
 
 
 def _desktop() -> str:

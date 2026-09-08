@@ -7,7 +7,7 @@ const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 // Long working directories are noise; the last two segments say where you are,
 // and the full path is still on the title attribute.
-const shortPath = p => { const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/); return parts.length > 2 ? "…\\" + parts.slice(-2).join("\\") : p; };
+const shortPath = p => { const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/); const sep = String(p || "").includes("\\") ? "\\" : "/"; return parts.length > 2 ? "…" + sep + parts.slice(-2).join(sep) : p; };
 const PRESETS = ["#5fe36a", "#ffc23d", "#ff5d5d", "#5b9dff", "#4dd0e1", "#c084fc", "#ffffff"];
 // Feed filters. Each is a prefix test on the event type, so a new event family
 // falls into "Everything else" instead of disappearing.
@@ -147,12 +147,21 @@ function deviceById(id) { return S.state.devices.find(d => d.id === id); }
 // ---------- rendering ----------
 function render() {
   const st = S.state;
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.page === S.page));
+  document.querySelectorAll("#nav a").forEach(a => {
+    const active = a.dataset.page === S.page;
+    a.classList.toggle("active", active);
+    if (active) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
   renderSidebar();
-  if (!st) { $("#main").innerHTML = `<div class="card" style="margin-top:60px"><div class="empty"><b>Can't reach Lumen</b>The background app doesn't seem to be running. Start it from the tray icon, or run <span class="mono">lumen start</span>.<br><span class="mono dim">${h(S.error || "")}</span></div></div>`; return; }
+  if (!st) { $("#main").innerHTML = `<div class="card" style="margin-top:60px"><div class="empty"><b>Can't reach Lumen</b>The background app doesn't seem to be running. Open the Lumen app, or run <span class="mono">lumen</span>.<br><span class="mono dim">${h(S.error || "")}</span></div></div>`; return; }
   if (document.activeElement && $("#main").contains(document.activeElement) && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   const pages = { dashboard: renderDashboard, devices: renderDevices, automations: renderAutomations, integrations: renderIntegrations, effects: renderEffects, settings: renderSettings };
+  const openPanels = [...document.querySelectorAll("#main details[id][open]")].map(el => el.id);
+  const focusedPanel = document.activeElement?.tagName === "SUMMARY" ? document.activeElement.parentElement.id : null;
   $("#main").innerHTML = (pages[S.page] || renderDashboard)(st);
+  openPanels.forEach(id => { const el = document.getElementById(id); if (el) el.open = true; });
+  if (focusedPanel) document.getElementById(focusedPanel)?.querySelector("summary")?.focus({ preventScroll: true });
   if (!st.onboarded && !S.wizard && !$("#modal-root").children.length) openWizard();
 }
 
@@ -178,39 +187,37 @@ function renderDashboard(st) {
   const needs = sess.filter(s => s.status === "input").length;
 
   // One plain sentence at the top: what is Lumen doing for you right now?
-  let tone = "", headline = "Everything is running";
-  if (st.paused) { tone = "paused"; headline = "Lumen is paused"; }
+  let tone = "", headline = "Ready when you are";
+  if (S.error) { tone = "down"; headline = "Connection interrupted"; }
+  else if (st.paused) { tone = "paused"; headline = "Lumen is paused"; }
   else if (needs) { tone = "attn"; headline = `${needs} ${needs === 1 ? "task is" : "tasks are"} waiting for you`; }
   else if (busy) { tone = "busy"; headline = `${busy} ${busy === 1 ? "task is" : "tasks are"} working`; }
-  const sub = st.paused
-    ? "Your devices are back under their own control."
-    : `${on.length} of ${st.devices.length} devices connected · ${rules.length} automation${rules.length === 1 ? "" : "s"} on · running for ${uptime(st.uptime_s)}`;
+  const sub = S.error ? "Showing the last received state. Lumen will reconnect automatically."
+    : st.paused ? "Your devices are back under their own control. Resume to run your automations."
+    : needs ? "An agent needs your input. Check your open tabs to keep things moving."
+    : busy ? "Your agents are at work. Follow their progress here and on your devices."
+    : "Lumen is listening. Your agents’ progress will appear below.";
 
   return `
-  <div class="page-head"><div><h1>Dashboard</h1><p>What your devices are doing right now.</p></div></div>
+  <div class="page-head dashboard-head"><div><h1>Overview</h1><p>Your agents, at a glance.</p></div>
+    <a class="btn" href="#integrations">Connect an agent <span aria-hidden="true">↗</span></a></div>
 
-  <div class="card section"><div class="hero ${tone}">
-    <div class="hero-orb"><i></i></div>
+  <section class="card section overview" aria-label="Workspace status"><div class="hero ${tone}">
+    <div class="hero-orb" aria-hidden="true"><i></i></div>
     <div class="hero-text"><b>${h(headline)}</b><span>${h(sub)}</span></div>
     <div class="hero-actions">
-      <button class="btn" onclick="L.emit('agent.finished', {agent: 'claude'})" title="Fires an agent.finished event">Test my lights</button>
-      <button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>
+      <button class="btn primary" onclick="L.emit('agent.finished', {agent: 'claude'})" ${st.paused || S.error ? "disabled" : ""} title="Run automations for a test agent.finished event">Test my lights</button>
+      <button class="btn" onclick="L.pause(${!st.paused})" ${S.error ? "disabled" : ""}>${st.paused ? "Resume automations" : "Pause automations"}</button>
     </div>
-  </div></div>
+  </div>
+  </section>
+  <div class="overview-links"><a href="#devices"><span class="dot ${on.length ? "on" : ""}" aria-hidden="true"></span>${on.length} devices connected <span aria-hidden="true">↗</span></a><a href="#automations">${rules.length} automations enabled <span aria-hidden="true">↗</span></a></div>
+  ${st.quiet_now ? `<div class="dashboard-notice"><span class="dot warn" aria-hidden="true"></span><span>Quiet hours are active. Some effects may be muted.</span><a href="#settings">Manage quiet hours →</a></div>` : ""}
 
-  ${st.devices.length ? "" : `<div class="card section"><div class="empty"><b>No lights found yet</b>
-    Plug in supported hardware, or install OpenRGB for gaming peripherals, then scan.<br>
-    <a class="btn primary mt" href="#devices" style="display:inline-flex">Go to Devices</a></div></div>`}
+  ${sessionList(st)}
+  <details class="disclosure" id="dashboard-lights"><summary><span>Device preview<small>See your lights and adjust their layout</small></span></summary><div class="disclosure-body">${st.devices.length ? liveBoard(st) + deviceStrip(st) : `<p class="muted">No devices connected yet. <a class="more" href="#devices">Find devices →</a></p>`}</div></details>
 
-  ${liveBoard(st)}
-
-  <div class="two-col">
-    <div>
-      ${sessionList(st)}
-      ${deviceStrip(st)}
-    </div>
-    <div class="rail">
-      <div class="section"><div class="section-head"><h2>Activity</h2>
+      <details class="disclosure" id="dashboard-activity"><summary><span>Recent activity<small>Events from your agents and automations</small></span></summary><div class="disclosure-body"><div class="section-head">
         <span class="spacer"></span>
         ${st.activity.length ? `<button class="btn sm ghost" onclick="L.clearFeed()">Clear</button>` : ""}</div>
         ${st.activity.length ? `<div class="filters" role="group" aria-label="Filter the feed">${FEED_FILTERS.map(([f, name]) => `<button class="chip-btn ${S.feed === f ? "on" : ""}" aria-pressed="${S.feed === f}" onclick="L.feed('${f}')">${h(name)}</button>`).join("")}</div>` : ""}
@@ -219,17 +226,9 @@ function renderDashboard(st) {
           return `<div class="card">${shown.length ? `<div class="feed">${shown.map(a => feedItem(a)).join("")}</div>`
             : `<div class="empty"><b>${st.activity.length ? "Nothing here" : "Nothing yet"}</b>${st.activity.length ? "No recent events match this filter." : "Events from your agents, builds and scripts show up here."}</div>`}</div>`;
         })()}
-      </div>
-      <div class="section"><div class="section-head"><h2>Your automations</h2><span class="count">${rules.length}/${st.rules.length}</span><span class="spacer"></span><a class="more" href="#automations">Manage →</a></div>
-        <div class="card">${st.rules.length ? `<div class="rows">${st.rules.slice(0, 6).map(r => `<div class="row compact">
-          <div class="row-main"><div class="row-title">${h(r.name || "Untitled")}</div>
-          <div class="row-sub">${ruleSentence(r)}</div></div>
-          ${toggleBtn(r.enabled, `L.toggleRule('${js(r.id)}')`, `${r.enabled ? "On" : "Off"}: ${r.name || "automation"}`)}</div>`).join("")}</div>`
-          : `<div class="empty"><b>No automations yet</b><a href="#automations">Create one →</a></div>`}</div>
-      </div>
+      </div></details>
       ${st.messages.length ? `<div class="section"><div class="section-head"><h2>Notes</h2></div><div class="card"><div class="feed">${st.messages.map(m => `<div class="feed-item"><span class="feed-time">${clock(m.ts)}</span><span class="feed-body small muted">${h(m.text)}</span></div>`).join("")}</div></div></div>` : ""}
-    </div>
-  </div>`;
+  `;
 }
 
 // Mirrors effects.spread_zones on the daemon side: the tabs that are open widen
@@ -432,7 +431,7 @@ function sessionList(st) {
       Your devices cover ${seats} ${seats === 1 ? "zone" : "zones"}, and the tabs above have taken all of them. Drag one of these up to swap it in, or close the tabs you are done with.`
       : `<b>No automation puts these tabs on a device.</b>
       They are still tracked, but nothing lights up per tab until an automation shows agent status on a device with more than one zone. <a href="#automations">Set one up →</a>`}</div>${group(offZone)}` : ""}`
-      : `<div class="empty"><b>No agent tabs open</b>Open a Claude Code or Codex tab. One tab lights the whole keyboard; open a second and they take half each.</div>`}</div></div>`;
+      : `<div class="empty"><b>Your next session starts here</b>Open Claude Code or Codex to see its progress.<br><a class="btn mt" href="#integrations" style="display:inline-flex">Set up an agent</a></div>`}</div></div>`;
 }
 
 // A glance, not the Devices page: one line per device with its live colour.
@@ -689,25 +688,26 @@ function renderSettings(st) {
   // start_minimized); the click still writes the opposite of what is stored.
   const tog = (key, inv) => toggleBtn(inv ? !s[key] : s[key], `L.setting('${key}', ${!s[key]})`, key.replace(/_/g, " "));
   return `
-  <div class="page-head"><div><h1>Settings</h1><p>Lumen runs in the tray. Everything it stores lives in one folder you can delete at any time.</p></div></div>
+  <div class="page-head"><div><h1>Settings</h1><p>Make Lumen feel right for you. Changes save automatically.</p></div></div>
 
-  <div class="section"><div class="section-head"><h2>General</h2></div><div class="card"><div class="rows">
+  <div class="settings-layout"><div class="settings-basics"><div class="section"><div class="section-head"><h2>Everyday preferences</h2></div><div class="card"><div class="rows">
     ${row("Start at login", "Launch Lumen automatically when you sign in.", tog("autostart"))}
     ${row("Open this dashboard on start", "Otherwise Lumen starts in the tray.", tog("start_minimized", true))}
     ${row("Reduce flashing", "Turns flashes into pulses, never faster than twice a second.", tog("reduce_flashing"))}
-    ${row("Keep the lights on when paused", "Pausing stops Lumen reacting but leaves your devices lit as they are, instead of handing them back to their own lighting.", tog("keep_lit"))}
+    ${row("Keep the lights on when paused", "Keep the current lighting when automations are paused.", tog("keep_lit"))}
     ${row("Appearance", "This dashboard's colours.", `<select class="input" aria-label="Appearance" onchange="L.theme(this.value)">${THEMES.map(([v, name]) => `<option value="${v}" ${currentTheme() === v ? "selected" : ""}>${name}</option>`).join("")}</select>`)}
     ${row("Run the setup again", "Finds your devices and connects your agents again.", `<button class="btn" onclick="L.openWizard()">Start setup</button>`)}
   </div></div></div>
 
   <div class="section"><div class="section-head"><h2>Quiet hours</h2>${st.quiet_now ? `<span class="chip">active now</span>` : ""}</div><div class="card"><div class="rows">
-    ${row("Quiet hours", "Stop your devices reacting at night. Notifications and sounds stay with your operating system's do-not-disturb.", toggleBtn(q.enabled, `L.quiet({enabled: ${!q.enabled}})`, "Quiet hours"))}
+    ${row("Quiet hours", "Give your lights a break on a daily schedule. Sounds follow system do-not-disturb.", toggleBtn(q.enabled, `L.quiet({enabled: ${!q.enabled}})`, "Quiet hours"))}
+  </div><details class="quiet-schedule" id="settings-quiet"><summary>Schedule · ${h(q.from)}–${h(q.to)}${q.enabled ? "" : " · off"}</summary><div class="rows">
     ${row("Between", "Local time. A window that runs past midnight is fine.", `<span class="inline"><input type="time" class="input" value="${h(q.from)}" aria-label="Quiet hours start" onchange="L.quiet({from: this.value})"><span class="dim">and</span><input type="time" class="input" value="${h(q.to)}" aria-label="Quiet hours end" onchange="L.quiet({to: this.value})"></span>`)}
     ${row("During those hours", "Keep the status colours but stop the flashing, or go completely dark.", `<select class="input" aria-label="What happens during quiet hours" onchange="L.quiet({mode: this.value})"><option value="no_flash" ${q.mode === "no_flash" ? "selected" : ""}>Colours stay, nothing flashes</option><option value="dark" ${q.mode === "dark" ? "selected" : ""}>Everything goes dark</option></select>`)}
-  </div></div></div>
+  </div></details></div></div>
 
-  <div class="section"><div class="section-head"><h2>Devices &amp; engine</h2></div><div class="card"><div class="rows">
-    ${row("Status tab on the screen edge", "A small dark tab: one lit bar per open agent tab, your Claude limits, hover for details, click a row to jump to that terminal.", tog("notch"))}
+  </div><div class="settings-extras"><div class="section-head"><h2>More options</h2></div><details class="disclosure" id="settings-screen"><summary><span>Screen status tab<small>Position, size and what it shows</small></span></summary><div class="rows">
+    ${row("Status tab on the screen edge", "Show agent progress in a small tab at the edge of your screen.", tog("notch"))}
     ${s.notch ? row("Where it sits", "Bottom keeps it clear of a MacBook's notch and menu bar.", `<select class="input" aria-label="Status tab position" onchange="L.setting('notch_position', this.value)">${[["top", "Top centre"], ["top-left", "Top left"], ["top-right", "Top right"], ["bottom", "Bottom centre"], ["left", "Left edge"], ["right", "Right edge"]].map(([v, name]) => `<option value="${v}" ${s.notch_position === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
     ${s.notch ? row("Where along the edge", "Drag the tab itself to put it anywhere, or set it here. Reset to use the preset above.", `<div class="inline"><input type="range" min="0" max="100" value="${s.notch_offset < 0 ? 50 : s.notch_offset}" aria-label="Status tab position along the edge" onchange="L.setting('notch_offset', +this.value)"><span class="muted small">${s.notch_offset < 0 ? "preset" : s.notch_offset + "%"}</span>${s.notch_offset >= 0 ? `<button class="btn sm ghost" onclick="L.setting('notch_offset', -1)">Reset</button>` : ""}</div>`) : ""}
     ${s.notch ? row("Thickness", "Thin stays out of the way; thick is easier to read from across the room.", `<select class="input" aria-label="Status tab thickness" onchange="L.setting('notch_size', this.value)">${[["thin", "Thin"], ["regular", "Regular"], ["thick", "Thick"]].map(([v, name]) => `<option value="${v}" ${(s.notch_size || "regular") === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
@@ -716,20 +716,22 @@ function renderSettings(st) {
     ${s.notch ? row("Hide when idle", "Minutes with no tab working or waiting on you before the tab goes away. 0 keeps it up. It comes back the moment an agent does something.", `<div class="inline"><input class="input num" type="number" min="0" max="1440" value="${s.notch_idle_hide_min ?? 0}" aria-label="Minutes idle before the status tab hides" onchange="L.setting('notch_idle_hide_min', +this.value)"><span class="muted small">min</span></div>`) : ""}
     ${s.notch ? row("Whose tabs", "Show every agent's sessions, or just one agent's.", `<select class="input" aria-label="Which agents the status tab shows" onchange="L.setting('notch_agents', this.value)">${[["all", "Claude and Codex"], ["claude", "Claude only"], ["codex", "Codex only"]].map(([v, name]) => `<option value="${v}" ${s.notch_agents === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
     ${s.notch ? row("What it shows", "Untick anything you don't want. Just the Claude limits and the live tabs is a popular pick.", `<div class="checks">${[["notch_show_sessions", "Live tabs"], ["notch_show_activity", "What each tab is doing"], ["notch_show_context", "Context window"], ["notch_show_cost", "Session cost"], ["notch_show_claude_usage", "Claude usage limits"], ["notch_show_codex_usage", "Codex usage limits"], ["notch_show_accent", "Agent colour on each bar"], ["notch_show_usage_follows_tabs", "Limits only while that agent has a tab open"]].map(([k, name]) => `<label class="check"><input type="checkbox" ${s[k] !== false ? "checked" : ""} onchange="L.setting('${k}', this.checked)"> ${name}</label>`).join("")}</div>`) : ""}
+  </div></details>
+  <details class="disclosure" id="settings-devices"><summary><span>Devices &amp; lighting<small>Device discovery and playback</small></span></summary><div class="rows">
     ${row("Start OpenRGB automatically", "Launches the OpenRGB server when it is installed but not running.", tog("launch_openrgb"))}
-    ${row("Look for new devices every", "Seconds between background scans. Set to 0 to scan only when you press the button.", `<input type="number" class="input num" min="0" value="${s.rescan_interval_s}" onchange="L.setting('rescan_interval_s', +this.value)">`)}
+    ${row("Look for new devices every", "Seconds between background scans. Set to 0 to scan only when you press the button.", `<input type="number" class="input num" min="0" aria-label="Seconds between device scans" value="${s.rescan_interval_s}" onchange="L.setting('rescan_interval_s', +this.value)">`)}
     ${row(st.paused ? "Lumen is paused" : "Lumen is running", st.paused ? "Your devices are back under their own control." : "Automations are reacting to events.", `<button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>`)}
-  </div></div></div>
+  </div></details>
 
-  <div class="section"><div class="section-head"><h2>Advanced</h2></div><div class="card"><div class="rows">
+  <details class="disclosure" id="settings-advanced"><summary><span>Advanced &amp; troubleshooting<small>Logs, webhook security and local API</small></span></summary><div class="rows">
     ${row("Write events to the log file", "Records each event and the automations it triggered.", tog("log_events"))}
-    ${row("Webhook token", "If set, anything posting to /api/events must send it as a bearer token.", `<input class="input" style="width:240px" placeholder="none" value="${h(s.webhook_token)}" onchange="L.setting('webhook_token', this.value)">`)}
+    ${row("Webhook token", "If set, anything posting to /api/events must send it as a bearer token.", `<input class="input" type="password" autocomplete="off" aria-label="Webhook token" style="width:240px" placeholder="none" value="${h(s.webhook_token)}" onchange="L.setting('webhook_token', this.value)">`)}
     ${row("Log", "The last lines Lumen wrote. Start here when a device or an agent misbehaves.", `<button class="btn sm" onclick="L.loadLog()">${S.log ? "Refresh" : "Show"}</button>`)}
   </div>${S.log ? `<pre class="log" id="log-view">${h(S.log.join("\n") || "(the log is empty)")}</pre>` : ""}<div class="rows">
-    ${row("Port", "Where this dashboard and the API listen on 127.0.0.1. Takes effect after a restart.", `<input type="number" class="input num" value="${s.port}" onchange="L.setting('port', +this.value)">`)}
-  </div></div></div>
+    ${row("Port", "Where this dashboard and the API listen on 127.0.0.1. Takes effect after a restart.", `<input type="number" class="input num" aria-label="Local API port" value="${s.port}" onchange="L.setting('port', +this.value)">`)}
+  </div></details></div></div>
 
-  <div class="section"><div class="section-head"><h2>About</h2></div><div class="card"><div class="rows">
+  <div class="section settings-about"><div class="section-head"><h2>About &amp; updates</h2></div><div class="card"><div class="rows">
     ${row(`Lumen v${h(st.version)}`, `<span id="update-msg">${S.update ? (S.update.available ? `Version ${h(S.update.latest)} is available.` : S.update.error ? h(S.update.error) : "You're on the latest version.") : "Checks GitHub releases only when you press the button."}</span>`,
       S.update?.available ? `<button class="btn primary" id="update-btn" onclick="L.applyUpdate()">${S.update.frozen ? `Update to v${h(S.update.latest)}` : "How to update"}</button>` : `<button class="btn" id="update-btn" onclick="L.checkUpdate()">Check for updates</button>`)}
     <div class="card-pad row-sub" style="line-height:1.8"><a href="https://github.com/Brxerq/lumen" target="_blank" rel="noopener" style="color:var(--blue)">source &amp; issues</a> · MIT licensed.<br>API: <span class="mono">GET /api/state</span>, <span class="mono">POST /api/events</span>, <span class="mono">POST /api/scan</span>. See <span class="mono">docs/API.md</span>.</div>

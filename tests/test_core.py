@@ -229,6 +229,27 @@ def test_engine_replays_every_persistent_action_from_one_rule(tmp_path):
     engine.stop()
 
 
+def test_engine_replays_persistent_actions_in_latest_firing_order(tmp_path):
+    from lumen.core.engine import Engine
+
+    light = FakeLight("light")
+    found = [light]
+    engine = Engine(Config(tmp_path / "config.json"), integrations=[], discover=lambda s: list(found))
+    engine.config.set_rules([
+        Rule(id="a", when="a", actions=[Action(effect="set", color=(255, 0, 0))]),
+        Rule(id="b", when="b", actions=[Action(effect="set", color=(0, 0, 255))]),
+    ])
+    engine.scan()
+    for event_type in ("a", "b", "a"):
+        engine._on_event(Event(event_type))
+    assert light.colors[-1] == (255, 0, 0)
+    found.clear()
+    engine.scan()
+    found.append(FakeLight("light"))
+    engine.scan()
+    assert found[0].colors[-1] == (255, 0, 0)
+
+
 def test_engine_reapplies_edited_rules_immediately(tmp_path):
     from lumen.core.engine import Engine
     light = FakeLight("light")

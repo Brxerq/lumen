@@ -3,6 +3,7 @@ screen-glow child protocol and the adapter setup endpoint. All faked — none of
 these tests touch the registry, the login items or a real display."""
 
 import json
+import plistlib
 import re
 import sys
 from unittest import mock
@@ -55,6 +56,22 @@ def test_autostart_command_points_at_something_runnable():
     assert command and command[0]
     if not getattr(sys, "frozen", False):
         assert command[1:] == ["-m", "lumen"]
+
+
+def test_mac_login_entry_preserves_special_characters_in_executable_path(tmp_path, monkeypatch):
+    entry = tmp_path / "com.lumen.daemon.plist"
+    command = ["/Users/José & Co/Apps <local>/lumen", "--label=\"work\""]
+    monkeypatch.setattr(autostart.sys, "platform", "darwin")
+    monkeypatch.setattr(autostart, "_unix_file", lambda: entry)
+    monkeypatch.setattr(autostart, "command", lambda: command)
+    autostart.set_enabled(True)
+    with entry.open("rb") as stream:
+        assert plistlib.load(stream) == {
+            "Label": "com.lumen.daemon", "ProgramArguments": command, "RunAtLoad": True,
+        }
+    assert autostart.enabled()
+    autostart.set_enabled(False)
+    assert not autostart.enabled()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the registry path is covered by its own test")

@@ -18,8 +18,11 @@ jobs:
           - os: windows-latest
             asset: lumen.exe
             built: dist/lumen.exe
-          - os: macos-latest
+          - os: macos-15
             asset: lumen-macos
+            built: dist/lumen
+          - os: macos-15-intel
+            asset: lumen-macos-x86_64
             built: dist/lumen
           - os: ubuntu-latest
             asset: lumen-linux

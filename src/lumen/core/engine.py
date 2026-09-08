@@ -273,6 +273,7 @@ class Engine:
                 for index, action in enumerate(rule.actions):
                     self.player.run(action, event)
                     if EFFECTS.get(action.effect, {}).get("persistent"):
+                        self._persistent.pop((rule.id, index), None)
                         self._persistent[(rule.id, index)] = (action, event)
         self.activity.append({**event.to_dict(), "rules": fired})
         self.bump()

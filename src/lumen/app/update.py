@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -25,7 +27,13 @@ from lumen import __version__, paths
 
 REPO = "Brxerq/lumen"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
-ASSET = {"win32": "lumen.exe", "darwin": "lumen-macos", "linux": "lumen-linux"}.get(sys.platform, "")
+def _platform_asset() -> str:
+    if sys.platform == "darwin":
+        return {"arm64": "lumen-macos", "x86_64": "lumen-macos-x86_64"}.get(platform.machine(), "")
+    return {"win32": "lumen.exe", "linux": "lumen-linux"}.get(sys.platform, "")
+
+
+ASSET = _platform_asset()
 SUMS = "SHA256SUMS"
 DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
 
@@ -195,19 +203,21 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
                          close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
     else:
-        script = Path(tempfile.gettempdir()) / "lumen-update.sh"
-        script.write_text(
-            "#!/bin/sh\n"
-            f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
-            f"mv -f '{new}' '{exe}' && chmod +x '{exe}' && sleep 3\n"
-            # Same start-and-probe as on Windows; `sleep` needs no console here,
-            # but a first launch can still be slow enough to be worth a retry.
-            "for try in 1 2 3 4; do\n"
-            f"  nohup '{exe}' >/dev/null 2>&1 &\n"
-            "  sleep 15\n"
-            f"  lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 && break\n"
-            f"  pkill -f '{exe}'\n"
-            "done\n"
-            f"rm -f '{script}'\n", encoding="utf-8")
-        script.chmod(0o755)
+        quoted_exe = shlex.quote(str(exe))
+        with tempfile.NamedTemporaryFile(mode="w", prefix="lumen-update-", suffix=".sh",
+                                         encoding="utf-8", newline="\n", delete=False) as f:
+            script = Path(f.name)
+            f.write(
+                "#!/bin/sh\n"
+                f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
+                f"mv -f {shlex.quote(str(new))} {quoted_exe} && chmod +x {quoted_exe} && sleep 3\n"
+                # Same start-and-probe as on Windows; `sleep` needs no console here,
+                # but a first launch can still be slow enough to be worth a retry.
+                "for try in 1 2 3 4; do\n"
+                f"  nohup {quoted_exe} >/dev/null 2>&1 &\n"
+                "  sleep 15\n"
+                f"  lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 && break\n"
+                f"  pkill -f {quoted_exe}\n"
+                "done\n"
+                f"rm -f {shlex.quote(str(script))}\n")
         subprocess.Popen(["/bin/sh", str(script)], start_new_session=True, close_fds=True)

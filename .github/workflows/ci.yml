@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
         python: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
@@ -46,6 +46,8 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: ruff check src tests        # rules live in pyproject.toml
+      - run: node --check src/lumen/server/ui/app.js
+      - run: node tests/dashboard_smoke.cjs
       - run: pyright                     # scope lives in pyrightconfig.json
       # Not `python -m build`: this repository has a top-level build/ directory
       # (the PyInstaller spec lives there), and with the repo root on sys.path it

@@ -16,11 +16,11 @@ case "$(uname -s)" in
     *)      echo "This script covers macOS and Linux. On Windows run the PowerShell line from the README." >&2; exit 1 ;;
 esac
 
-# The release builds one binary per OS on the GitHub runners: arm64 for macOS,
-# x86_64 for Linux. Anything else has to build from source.
+# Select the native binary. Intel Macs cannot run the Apple Silicon build.
 ARCH="$(uname -m)"
 case "$(uname -s)-$ARCH" in
-    Darwin-arm64|Darwin-x86_64|Linux-x86_64) ;;
+    Darwin-arm64|Linux-x86_64) ;;
+    Darwin-x86_64) ASSET="lumen-macos-x86_64" ;;
     *) echo "No prebuilt binary for $ARCH. Install from source: pip install git+https://github.com/$REPO" >&2; exit 1 ;;
 esac
 

@@ -50,6 +50,11 @@ published SHA-256, and put it on your PATH — no Python, no toolchain. After th
 updates itself from **Settings → About**. You can also download the binary by hand from
 the releases page.
 
+Mac downloads are architecture-specific: `lumen-macos` for Apple Silicon and
+`lumen-macos-x86_64` for Intel. The installer and in-app updater select the
+matching build. Both builds have CI checks on macOS 15; physical keyboard
+backlight support still depends on the Mac model and macOS version.
+
 <details>
 <summary>From source (Python 3.11+)</summary>
 

@@ -57,16 +57,16 @@ def test_discovered_only_on_a_mac_that_answers(monkeypatch, darwin):
 
 def test_keyboard_id_comes_from_the_client_when_it_knows_one():
     fake = FakeClient()
-    assert mac_backlight.keyboard_id(fake) == mac_backlight.KEYBOARD  # no copyKeyboardBackgroundIDs at all
-    fake.copyKeyboardBackgroundIDs = lambda: []
+    assert mac_backlight.keyboard_id(fake) == mac_backlight.KEYBOARD  # no copyKeyboardBacklightIDs at all
+    fake.copyKeyboardBacklightIDs = lambda: []
     assert mac_backlight.keyboard_id(fake) == mac_backlight.KEYBOARD
-    fake.copyKeyboardBackgroundIDs = lambda: [3, 7]
+    fake.copyKeyboardBacklightIDs = lambda: [3, 7]
     assert mac_backlight.keyboard_id(fake) == 3
 
 
 def test_discover_addresses_the_keyboard_the_client_reports(monkeypatch, darwin):
     fake = FakeClient()
-    fake.copyKeyboardBackgroundIDs = lambda: [5]
+    fake.copyKeyboardBacklightIDs = lambda: [5]
     monkeypatch.setattr(mac_backlight, "client", lambda: fake)
     d = mac_backlight.discover()[0]
     d.set_brightness(0.4)
