@@ -2,11 +2,42 @@ import json
 import os
 import sqlite3
 import time
+import tracemalloc
 
 from lumen.core.events import Event
 from lumen.integrations import agent_sessions as ag
 from lumen.integrations import claude_code, codex
 from lumen.integrations.agent_sessions import DONE, INPUT, RUNNING
+
+
+def test_large_transcript_scans_keep_memory_bounded_and_retry_partial_lines(tmp_path):
+    transcript = tmp_path / "large.jsonl"
+    filler = json.dumps({"type": "response_item", "text": "x" * 1024}).encode() + b"\n"
+    complete = b'{"type":"event_msg","payload":{"type":"task_complete"}}'
+    usage = b'{"message":{"usage":{"input_tokens":7}}}\n'
+    with transcript.open("wb") as f:
+        f.write(b'{"type":"event_msg","payload":{"type":"task_started"}}\n')
+        for _ in range(4096):
+            f.write(filler)
+        f.write(usage)
+        f.write(complete)  # still being written by the agent
+    record = {}
+    for scan in (lambda: codex.turn_open(transcript), lambda: ag._accumulate_tokens(transcript, record)):
+        tracemalloc.start()
+        try:
+            scan()
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024, f"scan allocated {peak} bytes for a 4 MB transcript"
+    assert codex.turn_open(transcript) is True
+    assert record["tokens"]["in"] == 7
+    assert record["transcript_offset"] == transcript.stat().st_size - len(complete)
+    with transcript.open("ab") as f:
+        f.write(b"\n" + usage)
+    assert codex.turn_open(transcript) is False
+    ag._accumulate_tokens(transcript, record)
+    assert record["tokens"]["in"] == 14
 
 
 # What the daemon does with a directory of hook files, spelled out here rather

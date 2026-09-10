@@ -15,6 +15,9 @@ assert.match(source, /document\.body\.append\(menu\)/);
 assert.match(source, /\.menu\.portal-open/);
 vm.runInContext(source.split('// ---------- boot ----------')[0], context);
 vm.runInContext(`
+  assert.deepStrictEqual(Array.from(DEF_PALETTE.done), [0, 255, 0]);
+  assert.deepStrictEqual(Array.from(PRESETS.slice(0, 3)), ['#00ff00', '#ffb400', '#ff0000']);
+  assert(PRESETS.slice(0, -1).every(p => Math.min(...rgb(p)) === 0 && Math.max(...rgb(p)) === 255));
   const sample = { devices: [], rules: [], sessions: [], activity: [], messages: [], uptime_s: 60 };
   S.state = sample;
   assert.match(renderDashboard(sample), /Ready when you are/);

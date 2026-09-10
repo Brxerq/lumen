@@ -15,7 +15,7 @@ def test_summary_tolerates_every_shape_the_endpoint_answers_with():
     # top level, with and without the _window suffix
     assert cx.summarize({"primary_window": {"used_percent": 5}}) == {"five_hour": {"used": 5, "resets_at": None}}
     assert cx.summarize({"primary": {"used": 5.6}, "secondary": {"utilization": 0}}) == {
-        "five_hour": {"used": 6, "resets_at": None}, "seven_day": {"used": 0, "resets_at": None}}
+        "five_hour": {"used": 5.6, "resets_at": None}, "seven_day": {"used": 0, "resets_at": None}}
     # a reset given as seconds from now needs a clock
     assert cx.summarize({"primary": {"used_percent": 1, "resets_in_seconds": 600}}, now=1000)["five_hour"][
         "resets_at"] == 1600.0

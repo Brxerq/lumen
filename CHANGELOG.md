@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-09-11
+
+### Fixed
+- Windows source installs launch the tray daemon in the background and retain startup logs; `run --no-tray` stays in the foreground.
+- Stream Claude transcripts and Codex rollouts one record at a time to avoid memory spikes while preserving token totals and partial-write handling.
+- Reuse notch fonts and the unfolded panel during animation, and transfer images directly to Tk instead of PNG encoding each frame.
+- Show compact, expandable provider rows in the notch: Codex weekly, Claude and Antigravity five-hour and weekly when reported. Missing quota data remains visible as unavailable; model rows are omitted.
+- Keep weekly percentages in provider headers while expanding just one bar: Claude five-hour in orange, Codex weekly in blue, and Antigravity five-hour in violet. Show remaining allowance and preserve provider-supplied decimal precision.
+- Do not invent zero-use Gemini quotas when only credentials are available.
+- Keep limits visible for recently completed task rows while hiding providers with only expired history. The collapsed notch shows only the percentage remaining.
+
+### Changed
+- Restore the v0.4 hardware palette: pure green, amber, and red. Color-selection presets now use saturated RGB values; dashboard theme colors are unchanged.
+
 ## [0.8.0] — 2026-09-11
 
 ### Added

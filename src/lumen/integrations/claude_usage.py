@@ -52,7 +52,7 @@ _lock = threading.Lock()
 _latest: dict | None = None
 _latest_at = 0.0
 _detail = "not checked yet"
-_samples: list[tuple[float, int]] = []  # (ts, five_hour used) — the burn rate window
+_samples: list[tuple[float, float]] = []  # (ts, five_hour used) — the burn rate window
 SAMPLES = 12
 
 
@@ -71,7 +71,7 @@ def flat(summary: dict) -> dict:
     """Each percentage as a plain int beside the nested blocks, so a rule can
     say "five_hour_used > 80" without reaching into a dict."""
     return {f"{key}_used": block["used"] for key, block in summary.items()
-            if isinstance(block, dict) and isinstance(block.get("used"), int)}
+            if isinstance(block, dict) and isinstance(block.get("used"), (int, float))}
 
 
 def label(key: str) -> str:
@@ -191,10 +191,10 @@ def _when(value) -> float | None:
     return None
 
 
-def _pct(used) -> int | None:
+def _pct(used) -> float | None:
     if not isinstance(used, (int, float)) or isinstance(used, bool):
         return None
-    return int(round(max(0.0, min(100.0, float(used)))))
+    return round(max(0.0, min(100.0, float(used))), 2)
 
 
 def summarize(raw: dict) -> dict:
@@ -249,7 +249,7 @@ def refresh(now: float | None = None) -> dict | None:
             _latest = summary
             _latest_at = time.time() if now is None else now
             used = (summary.get("five_hour") or {}).get("used")
-            if isinstance(used, int):
+            if isinstance(used, (int, float)):
                 _samples.append((time.time() if now is None else now, used))
                 del _samples[:-SAMPLES]
         _detail = note

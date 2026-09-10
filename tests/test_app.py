@@ -50,7 +50,59 @@ def test_redirect_output_to_log_rotates_and_leaves_a_console_alone(tmp_path, mon
         tray.sys.stdout.close()
 
 
+def test_background_daemon_logs_even_with_inherited_streams(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    log = tmp_path / "background.log"
+    try:
+        assert tray.redirect_output_to_log(log, force=True)
+        print("background startup")
+    finally:
+        sys.stdout.close()
+    assert log.read_text().strip() == "background startup"
+
+
 # --- autostart ----------------------------------------------------------------
+@pytest.mark.parametrize("argv,background", [([], True), (["run", "--open"], True),
+                                           (["run", "--background"], False), (["run", "--no-tray"], False)])
+def test_windows_source_launch_detaches_only_the_tray(argv, background, monkeypatch):
+    from lumen import cli
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    with mock.patch.object(autostart, "launch_background") as launch, mock.patch.object(tray, "run_app", return_value=0) as run:
+        assert cli.main(argv) == 0
+        assert launch.called is background
+        assert run.called is not background
+        if background:
+            launch.assert_called_once_with(open_ui="--open" in argv)
+
+
+def test_background_launch_hides_console_and_preserves_open(monkeypatch):
+    monkeypatch.setattr(autostart, "command", lambda: ["pythonw.exe", "-m", "lumen"])
+    monkeypatch.setattr(autostart.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    with mock.patch.object(autostart.subprocess, "Popen") as launch:
+        autostart.launch_background(open_ui=True)
+    assert launch.call_args.args[0] == ["pythonw.exe", "-m", "lumen", "run", "--background", "--open"]
+    assert launch.call_args.kwargs["creationflags"] == 0x08000000
+
+
+def test_background_launch_reports_spawn_failure(monkeypatch):
+    from lumen import cli
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    with mock.patch.object(autostart, "launch_background", side_effect=OSError("failed")):
+        assert cli.main([]) == 1
+
+
+def test_frozen_windowed_build_does_not_relaunch(monkeypatch):
+    from lumen import cli
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    with mock.patch.object(autostart, "launch_background") as launch, mock.patch.object(tray, "run_app", return_value=0):
+        assert cli.main([]) == 0
+        launch.assert_not_called()
+
+
 def test_autostart_command_points_at_something_runnable():
     command = autostart.command()
     assert command and command[0]
@@ -190,7 +242,7 @@ def test_notch_renders_both_states_and_obeys_the_setting(monkeypatch):
     assert d.show["cost"] is False and d.show["sessions"] is True and d.agents == "claude"
     assert notch.discover({"notch_agents": "everyone"})[0].agents == "all"
     # both agents' limits render as separately labelled meters
-    two = notch.render([(1, 1, 1)] * 6, [], {}, usage={"claude": {"five_hour": {"used": 10}}, "codex": {"five_hour": {"used": 20}}},
+    two = notch.render([(1, 1, 1)] * 6, [], {}, usage={"claude": {"five_hour": {"used": 10}}, "codex": {"seven_day": {"used": 20}}},
                        unfolded=True)
     one = notch.render([(1, 1, 1)] * 6, [], {}, usage={"claude": {"five_hour": {"used": 10}}}, unfolded=True)
     assert two.height > one.height > notch.HEIGHT

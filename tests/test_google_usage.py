@@ -13,9 +13,9 @@ def test_google_usage_summarize_various_payloads():
         "extra_unknown": 123,
     }
     out = gu.summarize(data)
-    assert out["daily"]["used"] == 45 and out["daily"]["resets_at"] == 1788700000.0
+    assert out["daily"]["used"] == 45.2 and out["daily"]["resets_at"] == 1788700000.0
     assert out["five_hour"]["used"] == 15 and out["five_hour"]["resets_at"] is None
-    assert out["gemini_pro"]["used"] == 83
+    assert out["gemini_pro"]["used"] == 82.6
     assert out["gemini_flash"]["used"] == 30
     assert "extra_unknown" not in out
 
@@ -38,6 +38,15 @@ def test_google_usage_credentials_and_refresh(tmp_path, monkeypatch):
     assert res is not None
     assert res["daily"]["used"] == 25
     assert gu.latest() == res
+
+
+def test_google_credentials_do_not_invent_zero_usage(monkeypatch):
+    monkeypatch.setattr(gu, "_latest", None)
+    monkeypatch.setattr(gu, "credentials", lambda: {"access_token": "test"})
+    monkeypatch.setattr(gu, "fetch", lambda *a: None)
+    monkeypatch.setattr(gu, "read_local_antigravity_usage", lambda: None)
+    assert gu.refresh() is None
+    assert "unavailable" in gu.detail()
 
 
 def test_gemini_scanner_finds_antigravity_sessions(tmp_path):

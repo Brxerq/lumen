@@ -2,13 +2,13 @@
 "use strict";
 
 const S = { state: null, page: "dashboard", draft: null, wizard: null, error: null, testColor: {}, quiet: 0, update: null, feed: "", drag: null, menu: null, request: 0, pendingRender: false, sync: { busy: false, message: "", error: false } };
-const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 143, 61] };
+const DEF_PALETTE = { running: [255, 180, 0], input: [255, 0, 0], done: [0, 255, 0] };
 const STATUS_LABEL = { running: "working", input: "needs you", done: "done" };
 const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 // Long working directories are noise; the last two segments say where you are,
 // and the full path is still on the title attribute.
 const shortPath = p => { const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/); const sep = String(p || "").includes("\\") ? "\\" : "/"; return parts.length > 2 ? "…" + sep + parts.slice(-2).join(sep) : p; };
-const PRESETS = ["#00f030", "#ff6000", "#ff1010", "#4285f4", "#4dd0e1", "#c084fc", "#ffffff"];
+const PRESETS = ["#00ff00", "#ffb400", "#ff0000", "#0055ff", "#00d5ff", "#aa00ff", "#ffffff"];
 // Feed filters. Each is a prefix test on the event type, so a new event family
 // falls into "Everything else" instead of disappearing.
 const FEED_FILTERS = [["", "All"], ["agent", "Agents"], ["build,deploy", "Builds"], ["command,timer", "Commands"], ["other", "Everything else"]];
@@ -189,7 +189,7 @@ function testMenu(d) {
   const effs = effectsFor(d);
   if (!effs.length) return "";
   return `<div class="menu-wrap"><button class="btn sm" onclick="L.menu(this)">Test <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-    <div class="menu"><label class="menu-color"><input type="color" class="color-input" value="${S.testColor[d.id] || "#008f3d"}" oninput="L.testColor('${js(d.id)}', this.value)"><span>Test color</span></label><div class="sep"></div>${effs.filter(e => e.id !== "sessions" && e.id !== "sound").map(e => `<button onclick="L.test('${js(d.id)}','${js(e.id)}')">${h(e.label)}</button>`).join("")}${effs.some(e => e.id === "sound")
+    <div class="menu"><label class="menu-color"><input type="color" class="color-input" value="${S.testColor[d.id] || "#00ff00"}" oninput="L.testColor('${js(d.id)}', this.value)"><span>Test color</span></label><div class="sep"></div>${effs.filter(e => e.id !== "sessions" && e.id !== "sound").map(e => `<button onclick="L.test('${js(d.id)}','${js(e.id)}')">${h(e.label)}</button>`).join("")}${effs.some(e => e.id === "sound")
       ? soundChoices().map(([n, label]) => `<button onclick="L.test('${js(d.id)}','sound','${js(n)}')">${h(label)}</button>`).join("") : ""}</div></div>`;
 }
 
@@ -380,7 +380,7 @@ function liveBoard(st) {
       <div class="board-legend">
         <span><i class="swatch-sm" style="background:#fbbf24"></i>working</span>
         <span><i class="swatch-sm" style="background:#f87171"></i>needs you</span>
-        <span><i class="swatch-sm" style="background:#008f3d"></i>done</span>
+        <span><i class="swatch-sm" style="background:#00ff00"></i>done</span>
         <span class="dim">Every block is one agent tab. Open tabs share the device between them.</span>
       </div>
     </div></div></div>`;
@@ -675,7 +675,7 @@ function md(text) {
 
 function renderEffects(st) {
   const devs = st.devices.filter(d => d.capabilities.length && d.details.enabled !== false);
-  const d = S.bench || (S.bench = { devices: devs.map(x => x.id), effect: "flash", color: "#008f3d", count: 2, duration: 1.5, message: "Hello from Lumen", sound: soundChoices()[0][0] });
+  const d = S.bench || (S.bench = { devices: devs.map(x => x.id), effect: "flash", color: "#00ff00", count: 2, duration: 1.5, message: "Hello from Lumen", sound: soundChoices()[0][0] });
   return `
   <div class="page-head"><div><h1>Playground</h1><p>Pick devices, an effect and a colour, then play it on the hardware. Nothing here is saved.</p></div></div>
   <div class="two-col">
@@ -838,12 +838,12 @@ function actionEditor(a, i, devs) {
     ${a.device === "*" ? `<div class="hint dim small">Runs on every device that supports it; backlights without color pulse their brightness instead.</div>` : ""}
   </div>`;
 }
-function newAction() { return { device: "*", effect: "flash", color: [0, 143, 61], duration: 1.5, count: 2, brightness: 1, message: "", sound: soundChoices()[0][0], palette: { ...DEF_PALETTE }, offset: 0, agent: "", per_zone: true }; }
+function newAction() { return { device: "*", effect: "flash", color: [0, 255, 0], duration: 1.5, count: 2, brightness: 1, message: "", sound: soundChoices()[0][0], palette: { ...DEF_PALETTE }, offset: 0, agent: "", per_zone: true }; }
 function openModal(html) { $("#modal-root").innerHTML = html; }
 
 // ---------- onboarding wizard ----------
 function openWizard() {
-  S.wizard = { step: 0, scanned: false, choice: { effect: "flash", color: "#008f3d", devices: "*", notify: true } };
+  S.wizard = { step: 0, scanned: false, choice: { effect: "flash", color: "#00ff00", devices: "*", notify: true } };
   renderWizard();
   act(() => api("POST", "/api/scan")).then(() => { S.wizard && (S.wizard.scanned = true); renderWizard(); });
 }
@@ -938,7 +938,7 @@ const L = window.L = {
   },
   testColor(id, v) { S.testColor[id] = v; },
   forget: id => act(() => api("DELETE", `/api/sessions/${id}`), r => r.forgotten ? "session forgotten" : "no hook file for that session (it is tracked from the agent's own record)"),
-  test: (id, effect, sound) => act(() => api("POST", `/api/devices/${id}/test`, { effect, sound, color: rgb(S.testColor[id] || "#008f3d"), count: 2, duration: 1.5 }),
+  test: (id, effect, sound) => act(() => api("POST", `/api/devices/${id}/test`, { effect, sound, color: rgb(S.testColor[id] || "#00ff00"), count: 2, duration: 1.5 }),
     r => r.touched.length ? `Playing ${sound || effect} on ${deviceById(id)?.name || id}` : `${deviceById(id)?.name || id} is disabled or can't do ${effect}`),
   scan: () => act(() => api("POST", "/api/scan"), r => `${r.devices.length} device(s) found`),
   pause: v => act(() => api("POST", "/api/pause", { paused: v })),

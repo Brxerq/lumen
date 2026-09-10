@@ -14,15 +14,15 @@ def test_summary_keeps_every_window_the_account_has():
                       {"kind": "weekly_scoped", "percent": 54, "scope": {"model": {"id": None, "display_name": "Fable"}}},
                       {"kind": "session", "percent": 99}, {"kind": 3}, "x"]}
     out = cu.summarize(raw)
-    assert out["five_hour"]["used"] == 23 and out["five_hour"]["resets_at"] == 1788782400.0   # named block beats "limits"
+    assert out["five_hour"]["used"] == 23.4 and out["five_hour"]["resets_at"] == 1788782400.0   # named block beats "limits"
     assert out["seven_day"] == {"used": 100, "resets_at": 1788700000.0}      # clamped, numeric timestamp accepted
     assert out["seven_day_opus"] == {"used": 5, "resets_at": None}
-    assert out["seven_day_sonnet"] == {"used": 42, "resets_at": 1788700000.0}
+    assert out["seven_day_sonnet"] == {"used": 41.6, "resets_at": 1788700000.0}
     assert out["seven_day_fable"] == {"used": 54, "resets_at": None}
     assert cu.ordered(out) == ["five_hour", "seven_day", "seven_day_fable", "seven_day_opus", "seven_day_sonnet"]
     assert cu.label("seven_day_opus") == "Week · Opus" and cu.label("seven_day_fable") == "Week · Fable"
     assert cu.summarize({"five_hour": {"utilization": "n/a"}, "seven_day": "x"}) == {}
-    assert cu.summarize({"five_hour": {"used": 0.5, "resets_at": "garbage"}}) == {"five_hour": {"used": 0, "resets_at": None}}
+    assert cu.summarize({"five_hour": {"used": 0.5, "resets_at": "garbage"}}) == {"five_hour": {"used": 0.5, "resets_at": None}}
 
 
 def test_an_expired_token_is_renewed_and_written_back(tmp_path, monkeypatch):

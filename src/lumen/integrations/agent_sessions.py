@@ -214,27 +214,29 @@ def _accumulate_tokens(transcript: Path, record: dict) -> None:
             if size < offset:  # truncated or a different session reusing the path
                 offset, totals = 0, {}
             f.seek(offset)
-            chunk = f.read(size - offset)
+            while f.tell() < size:
+                raw = f.readline(size - f.tell())
+                if not raw.endswith(b"\n"):
+                    break  # leave partial records for the next hook
+                offset = f.tell()
+                if b'"usage"' not in raw:
+                    continue
+                try:
+                    message = json.loads(raw).get("message") or {}
+                    usage = message.get("usage") or {}
+                    counts = {"in": int(usage.get("input_tokens", 0)), "out": int(usage.get("output_tokens", 0)),
+                              "cache_write": int(usage.get("cache_creation_input_tokens", 0)),
+                              "cache_read": int(usage.get("cache_read_input_tokens", 0))}
+                except (ValueError, AttributeError, TypeError):
+                    continue
+                for key, value in counts.items():
+                    totals[key] = int(totals.get(key, 0)) + value
+                if message.get("model"):
+                    record["model"] = str(message["model"])
     except OSError:
         return
-    end = chunk.rfind(b"\n") + 1
-    for raw in chunk[:end].splitlines():
-        if b'"usage"' not in raw:
-            continue
-        try:
-            message = json.loads(raw).get("message") or {}
-            usage = message.get("usage") or {}
-            counts = {"in": int(usage.get("input_tokens", 0)), "out": int(usage.get("output_tokens", 0)),
-                      "cache_write": int(usage.get("cache_creation_input_tokens", 0)),
-                      "cache_read": int(usage.get("cache_read_input_tokens", 0))}
-        except (ValueError, AttributeError, TypeError):
-            continue
-        for key, value in counts.items():
-            totals[key] = int(totals.get(key, 0)) + value
-        if message.get("model"):
-            record["model"] = str(message["model"])
     record["tokens"] = totals
-    record["transcript_offset"] = offset + end
+    record["transcript_offset"] = offset
 
 
 def context_usage(transcript: Path, record: dict | None = None) -> dict | None:

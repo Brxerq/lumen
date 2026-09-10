@@ -1,11 +1,64 @@
 
 
+def test_notch_shows_only_requested_account_windows():
+    from lumen.devices.notch import clean_usage
+    block = {"used": 42, "resets_at": 1234}
+    summary = dict.fromkeys(("five_hour", "seven_day", "seven_day_sonnet", "daily", "gemini_pro", "gemini_flash"), block)
+    assert clean_usage(dict.fromkeys(("claude", "codex", "gemini"), summary)) == {
+        "claude": {"five_hour": block, "seven_day": block},
+        "codex": {"seven_day": block},
+        "gemini": {"five_hour": block, "seven_day": block},
+    }
+    assert clean_usage({"gemini": {"daily": block, "gemini_pro": block}}) == {"gemini": {}}
+    assert clean_usage({"five_hour": block}) == {"claude": {"five_hour": block}}
+
+
+def test_notch_reuses_fonts_between_animation_frames():
+    from lumen.devices.notch import _font
+    _font.cache_clear()
+    assert _font(33, bold=True) is _font(33, bold=True)
+    assert _font.cache_info().hits == 1
+
+
+def test_minimal_usage_rows_expand_independently_and_keep_hit_positions():
+    from lumen.devices.notch import HEIGHT, ROW, clean_usage, render, usage_layout
+    block = {"used": 42, "resets_at": 7200}
+    usage = clean_usage({"claude": {"five_hour": block, "seven_day": block},
+                         "codex": {"seven_day": block}, "gemini": None})
+    folded = usage_layout(usage, 2)
+    expanded = usage_layout(usage, 2, {"claude", "gemini"})
+    assert expanded[0][2] == folded[0][2]
+    assert expanded[0][3] == ROW + 16
+    assert expanded[1][2] == folded[1][2] + ROW + 16
+    assert expanded[2][3] == 0  # unavailable is never an empty expandable panel
+    for size in ("thin", "regular", "thick"):
+        kwargs = dict(zones=[(255, 180, 0)] * 6, rows=[], palette={}, usage=usage, unfolded=True, size=size)
+        closed = render(**kwargs)
+        opened = render(**kwargs, expanded_usage={"claude"})
+        assert opened.height - closed.height == ROW + 16
+        assert closed.height > HEIGHT
+
+
+def test_single_bar_uses_remaining_allowance_and_provider_window():
+    from lumen.devices.notch import bar_window, remaining, remaining_label, usage_layout
+    summary = {"five_hour": {"used": 21.72}, "seven_day": {"used": 68}}
+    assert remaining(summary["five_hour"]) == 78.28
+    assert remaining_label(summary["five_hour"]) == "78.28% left"
+    assert remaining_label(summary["seven_day"]) == "32% left"
+    assert bar_window("claude", summary) == "five_hour"
+    assert bar_window("gemini", summary) == "five_hour"
+    assert bar_window("codex", summary) == "seven_day"
+    assert bar_window("claude", {"seven_day": {"used": 68}}) is None
+    assert usage_layout({"claude": {"seven_day": {"used": 68}}}, 0, {"claude"})[0][3] == 0
+    assert remaining({"used": 120}) == 0 and remaining({"used": -1}) == 100
+
+
 def test_usage_meters_follow_the_open_tabs():
     from lumen.devices.notch import visible_usage
     usage = {"claude": {"five_hour": {"used": 20}}, "codex": {"seven_day": {"used": 100}}}
     show = {"claude_usage": True, "codex_usage": True, "usage_follows_tabs": True}
-    claude_only = [{"agent": "claude"}]
-    both = [{"agent": "claude"}, {"agent": "codex"}]
+    claude_only = [{"agent": "claude", "status": "running"}]
+    both = [{"agent": "claude", "status": "running"}, {"agent": "codex", "status": "input"}]
 
     # by default a known limit stays up whether or not that agent has a tab open
     assert sorted(visible_usage(usage, claude_only, {**show, "usage_follows_tabs": False})) == ["claude", "codex"]
@@ -14,9 +67,24 @@ def test_usage_meters_follow_the_open_tabs():
     assert list(visible_usage(usage, claude_only, show)) == ["claude"]
     assert sorted(visible_usage(usage, both, show)) == ["claude", "codex"]
     assert visible_usage(usage, [], show) == {}
+    assert list(visible_usage(usage, [{"agent": "claude", "status": "done"}], show)) == ["claude"]
+    assert list(visible_usage(usage, [*claude_only, {"agent": "codex", "status": "done", "ts": 1}], show)) == ["claude"]
     # the two existing filters still apply on top
     assert list(visible_usage(usage, both, {**show, "codex_usage": False})) == ["claude"]
     assert list(visible_usage(usage, both, show, agents="codex")) == ["codex"]
+
+
+def test_quota_rows_follow_recent_completed_tabs_and_their_expiry(monkeypatch):
+    from lumen.devices import notch
+    monkeypatch.setattr(notch.time, "time", lambda: 10000)
+    usage = {a: {"seven_day": {"used": 20}} for a in ("claude", "codex", "gemini")}
+    sessions = [{"agent": "claude", "status": "done", "ts": 9900},
+                {"agent": "codex", "status": "running", "ts": 1},
+                {"agent": "gemini", "status": "done", "ts": 1}]
+    show = {"usage_follows_tabs": True}
+    assert list(notch.visible_usage(usage, sessions, show)) == ["claude", "codex"]
+    assert list(notch.visible_usage(usage, sessions, show, options={"completed_hide_min": 1})) == ["codex"]
+    assert list(notch.visible_usage(usage, sessions, show, options={"show": {"sessions": False}})) == ["claude", "codex"]
 
 
 def test_the_tab_can_sit_anywhere_along_the_edge():

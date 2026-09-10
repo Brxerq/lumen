@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="run the daemon (default)")
     run.add_argument("--no-tray", action="store_true")
     run.add_argument("--open", action="store_true", help="open the dashboard on start")
+    run.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     sub.add_parser("hook")
     sub.add_parser("scan", help="list detected devices")
     test = sub.add_parser("test", help="play an effect on a device")
@@ -66,6 +67,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command in (None, "run"):
+        if (sys.platform == "win32" and not getattr(sys, "frozen", False)
+                and not getattr(args, "no_tray", False) and not getattr(args, "background", False)):
+            from lumen.app.autostart import launch_background
+            try:
+                launch_background(open_ui=getattr(args, "open", False))
+            except OSError as e:
+                print(f"lumen: could not start in the background: {e}", file=sys.stderr)
+                return 1
+            return 0
         from lumen.app.tray import run_app
         return run_app(no_tray=getattr(args, "no_tray", False), open_ui=True if getattr(args, "open", False) else None)
     if args.command == "scan":

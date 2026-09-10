@@ -135,7 +135,7 @@ def summarize(raw: dict, now: float | None = None) -> dict:
         # one that says its own length wins over the one that fell back.
         if name in out and name != ours:
             continue
-        out[name] = {"used": int(round(max(0.0, min(100.0, float(used))))), "resets_at": _resets(block, now)}
+        out[name] = {"used": round(max(0.0, min(100.0, float(used))), 2), "resets_at": _resets(block, now)}
     return out
 
 

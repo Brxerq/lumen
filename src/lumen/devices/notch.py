@@ -25,6 +25,7 @@ tab's terminal to the front.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import subprocess
@@ -40,8 +41,8 @@ from lumen.devices.screen import ScreenGlow
 ZONE_COUNT = 6
 # Geometry (logical px). The tab is a flat-topped capsule; hover widens it into a panel.
 WIDTH, HEIGHT, RADIUS = 236, 24, 12
-PANEL_WIDTH, ROW, PANEL_PAD = 372, 30, 12
-USAGE_W = 58                 # room at the right of the folded tab for "5h 23%"
+PANEL_WIDTH, ROW, PANEL_PAD = 460, 30, 12
+USAGE_W = 58                 # room for the remaining percentage in the folded tab
 METER_H = 4
 BAR_H, BAR_GAP, BAR_INSET = 6, 6, 20
 ALPHA = 0.96
@@ -202,11 +203,43 @@ def clean_usage(usage) -> dict:
         usage = {"claude": usage}
     out = {}
     for agent, summary in usage.items():
-        if not isinstance(summary, dict):
-            continue
-        blocks = {k: v for k, v in summary.items() if isinstance(v, dict) and isinstance(v.get("used"), (int, float))}
-        if blocks:
+        summary = summary if isinstance(summary, dict) else {}
+        windows = {"claude": ("five_hour", "seven_day"), "codex": ("seven_day",),
+                   "gemini": ("five_hour", "seven_day"), "google": ("five_hour", "seven_day")}.get(agent, ())
+        blocks = {k: summary[k] for k in windows if isinstance(summary.get(k), dict)
+                  and isinstance(summary[k].get("used"), (int, float))}
+        if windows:
             out[str(agent)] = blocks
+    return out
+
+
+USAGE_COLORS = {"claude": (226, 151, 113), "codex": (105, 167, 255),
+                "gemini": (181, 152, 255), "google": (181, 152, 255)}
+
+
+def remaining(block: dict) -> float:
+    return round(100 - max(0, min(100, float(block["used"]))), 2)
+
+
+def remaining_label(block: dict) -> str:
+    return f"{remaining(block):.2f}".rstrip("0").rstrip(".") + "% left"
+
+
+def bar_window(agent: str, summary: dict) -> str | None:
+    key = "seven_day" if agent == "codex" else "five_hour"
+    return key if key in summary else None
+
+
+def usage_layout(usage: dict, row_count: int, expanded=(), height: int = HEIGHT) -> list[tuple]:
+    """Shared logical coordinates for painting and clicking provider headers."""
+    y = height + PANEL_PAD + ROW * row_count
+    if row_count and usage:
+        y += PANEL_PAD // 2
+    out = []
+    for agent, summary in usage.items():
+        detail_height = ROW + 16 if agent in expanded and bar_window(agent, summary) else 0
+        out.append((agent, summary, y, detail_height))
+        y += ROW + detail_height
     return out
 
 
@@ -223,17 +256,14 @@ def apply_show(rows: list[tuple], show: dict, agents: str = "all") -> list[tuple
     return out
 
 
-def visible_usage(usage: dict, sessions: list[dict], show: dict, agents: str = "all") -> dict:
-    """Which limit meters belong on the tab right now.
+def visible_usage(usage: dict, sessions: list[dict], show: dict, agents: str = "all", options: dict | None = None) -> dict:
+    """Follow present task rows, including recent completions, not old history.
 
-    A meter follows its agent's tabs. The limit itself is account-wide and stays
-    true whether or not anything is open — but the tab is a picture of what is
-    happening now, and a Codex meter still sitting there hours after Codex was
-    closed reads as stale data, not as information. Close Codex and its meter
-    goes; open it again and it comes back. Settings can switch either meter off,
-    and pointing the tab at one agent hides the other's meter as well as its
-    rows."""
-    live = {str(s.get("agent") or "") for s in sessions if isinstance(s, dict)}
+    Hiding task details is independent of displaying the provider's limits.
+    """
+    present = visible_sessions([s for s in sessions if isinstance(s, dict)],
+                               {**(options or {}), "show": {"sessions": True}})
+    live = {str(s.get("agent") or "") for s in present}
     follow = show.get("usage_follows_tabs", False)  # the 0.7.1 rule, now opt-in: hide a closed agent's meter
     return {a: s for a, s in usage.items()
             if (a in live or not follow) and show.get(f"{a}_usage", True) and (agents == "all" or a == agents)}
@@ -355,6 +385,7 @@ def panel_row_at(y: int, n_rows: int, height: int = HEIGHT) -> int | None:
     return int(i) if 0 <= i < n_rows else None
 
 
+@functools.lru_cache(maxsize=16)
 def _font(size: int, bold: bool = False):
     from PIL import ImageFont
     candidates = {
@@ -389,7 +420,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
            opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
            unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0,
            size: str = "regular", rounded: bool = False, accents: list[RGB | None] | None = None,
-           theme: str = "dynamic"):
+           theme: str = "dynamic", expanded_usage=()):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
     platform can't do per-pixel alpha). `unfolded` = the hover panel: session
     rows, then the usage meters. `fills` is one context-window percentage per
@@ -403,33 +434,18 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
 
     height, bar_h, width = SIZES.get(size, SIZES["regular"])
 
-    from lumen.integrations.claude_usage import label, ordered, resets_in
+    from lumen.integrations.claude_usage import resets_in
 
-    # usage is one agent's summary, or {agent: summary} for several; the first
-    # agent's session (or, without one, its week) owns the number on the folded tab
     by_agent = clean_usage(usage or {})
-    meters = []
-    if unfolded:
-        for agent, summary in by_agent.items():
-            if agent in ("gemini", "google"):
-                from lumen.integrations import google_usage
-                ord_fn, lbl_fn = google_usage.ordered, google_usage.label
-            else:
-                ord_fn, lbl_fn = ordered, label
-            for k in ord_fn(summary):
-                name = lbl_fn(k)
-                if len(by_agent) > 1 and not name.startswith(agent.capitalize()):
-                    name = ("Antigravity" if agent == "gemini" else agent.capitalize()) + " · " + (name.split(" · ", 1)[1] if " · " in name else name)
-                meters.append((name, summary[k]))
+    meters = usage_layout(by_agent, len(rows), expanded_usage, height) if unfolded else []
     five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "daily", "seven_day") if k in s), None)
-    five_key = next((k for s in by_agent.values() for k in ("five_hour", "daily", "seven_day") if k in s), None)
-    five_lbl = "24h" if five_key == "daily" else ("7d" if five_key == "seven_day" else "5h")
 
     BTN_H = 22
     w = PANEL_WIDTH if unfolded else width
     h = height
     if unfolded:
-        h += PANEL_PAD + ROW * len(rows) + (PANEL_PAD // 2 + ROW * len(meters) if meters else 0) + (PANEL_PAD + BTN_H) + PANEL_PAD - 8
+        content_end = meters[-1][2] + ROW + meters[-1][3] if meters else height + PANEL_PAD + ROW * len(rows)
+        h = content_end + 7 + BTN_H + PANEL_PAD
     W, H = w * SS, h * SS
 
     # Theme aesthetics: shell fill, stroke edge, and corner radius
@@ -510,13 +526,10 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 d.ellipse((x - SS, y0 - SS, x - SS + cap, y0 - SS + cap), fill=accent + (255,))
             x = x1 + gap
 
-    if five is not None and not unfolded:  # "5h 23%" / "24h 0%" at the right of the folded tab
+    if five is not None and not unfolded:  # only remaining percentage; window labels belong in the panel
         f = _font(11 * SS, bold=True)
         colour = usage_colour(int(five))
-        d.text((W - BAR_INSET * SS, height * SS // 2), f"{int(five)}%", font=f, fill=colour + (255,), anchor="rm")
-        px = d.textlength(f"{int(five)}%", font=f)
-        d.text((W - BAR_INSET * SS - px - 5 * SS, height * SS // 2), five_lbl, font=_font(10 * SS),
-               fill=MUTED + (255,), anchor="rm")
+        d.text((W - BAR_INSET * SS, height * SS // 2), remaining_label({"used": five}).removesuffix(" left"), font=f, fill=colour + (255,), anchor="rm")
 
     if unfolded:
         meta_f = _font(12 * SS)
@@ -582,24 +595,43 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 text = text[:-2].rstrip() + "…" if len(text) > 2 else ""
             d.text((x0, cy), text, font=meta_f, fill=MUTED + (255,), anchor="lm")
             y += ROW * SS
-        if meters:  # the subscription limits: a label, a thin meter, the number and the reset time
-            if rows:
-                d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=edge_stroke, width=SS)
-                y += PANEL_PAD * SS // 2
+        if meters:
             small = _font(11 * SS)
-            for name, block in meters:
-                pct = int(block["used"])
-                colour = usage_colour(pct)
+            for agent, summary, top_y, detail_height in meters:
+                y = top_y * SS
                 cy = y + ROW * SS // 2
-                d.text((BAR_INSET * SS, cy - 7 * SS), name, font=small, fill=MUTED + (255,), anchor="lm")
-                left = resets_in(block.get("resets_at"), now)
-                right = f"{pct}%" + (f"  ·  resets in {left}" if left else "")
-                d.text((W - BAR_INSET * SS, cy - 7 * SS), right, font=small, fill=INK + (255,), anchor="rm")
-                mx0, mx1, my = BAR_INSET * SS, W - BAR_INSET * SS, cy + 6 * SS
-                d.rounded_rectangle((mx0, my, mx1, my + METER_H * SS), radius=METER_H * SS // 2, fill=(255, 255, 255, 28))
-                fw = max(METER_H * SS, (mx1 - mx0) * pct / 100)
-                d.rounded_rectangle((mx0, my, mx0 + fw, my + METER_H * SS), radius=METER_H * SS // 2, fill=colour + (255,))
-                y += ROW * SS
+                name = "Antigravity" if agent in ("gemini", "google") else agent.capitalize()
+                d.line((BAR_INSET * SS, y, W - BAR_INSET * SS, y), fill=edge_stroke, width=SS)
+                d.text((BAR_INSET * SS, cy), name, font=meta_f, fill=INK + (255,), anchor="lm")
+                right = W - BAR_INSET * SS
+                if summary:
+                    d.text((right, cy), "−" if detail_height else "+" if bar_window(agent, summary) else "", font=meta_f, fill=MUTED + (255,), anchor="rm")
+                    right -= 18 * SS
+                    for k, block in reversed(list(summary.items())):
+                        text = ("5h" if k == "five_hour" else "7d") + f" · {remaining_label(block)}"
+                        tw = d.textlength(text, font=small)
+                        d.rounded_rectangle((right - tw - 10 * SS, cy - 9 * SS, right, cy + 9 * SS),
+                                            radius=4 * SS, fill=(35, 41, 52, 255))
+                        d.text((right - 5 * SS, cy), text, font=small, fill=USAGE_COLORS[agent] + (255,), anchor="rm")
+                        right -= tw + 16 * SS
+                else:
+                    d.text((right, cy), "Usage unavailable", font=small, fill=MUTED + (255,), anchor="rm")
+                if detail_height:
+                    k = bar_window(agent, summary)
+                    block = summary[k]
+                    x, x1 = BAR_INSET * SS, W - BAR_INSET * SS
+                    my = y + (ROW + 2) * SS
+                    d.rounded_rectangle((x, my, x1, my + METER_H * SS), radius=SS, fill=(39, 45, 55, 255))
+                    pct = remaining(block)
+                    if pct:
+                        d.rounded_rectangle((x, my, x + (x1 - x) * pct / 100, my + METER_H * SS),
+                                            radius=SS, fill=USAGE_COLORS[agent] + (255,))
+                    reset = resets_in(block.get("resets_at"), now)
+                    caption = ("5-hour" if k == "five_hour" else "7-day") + " · " + remaining_label(block)
+                    d.text((x, my + 12 * SS), caption, font=small, fill=USAGE_COLORS[agent] + (255,))
+                    d.text((x1, my + 12 * SS), f"Resets in {reset}" if reset else "Reset unavailable",
+                           font=small, fill=MUTED + (255,), anchor="ra")
+                y = (top_y + ROW + detail_height) * SS
 
         # Bottom quick action controls: [ ⚡ Dashboard ] [ ✕ Clear Done ]
         d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=edge_stroke, width=SS)
@@ -812,10 +844,11 @@ def _top_inset() -> int:
 
 
 def run_child() -> int:
-    import io
     import queue
     import threading
     import tkinter as tk
+
+    from PIL import ImageTk
 
     from lumen.core.rules import DEFAULT_PALETTE
 
@@ -842,10 +875,10 @@ def run_child() -> int:
     top = _top_inset()
 
     state = {"zones": [(0, 0, 0)] * ZONE_COUNT, "sessions": [], "usage": {}, "options": {}, "hover": False,
-             "photo": None, "pulse_until": 0.0, "waiting": set(), "fullscreen": False, "fs_checked": 0.0,
+             "photo": None, "image": None, "pulse_until": 0.0, "waiting": set(), "fullscreen": False, "fs_checked": 0.0,
              "reveal": 1.0,  # reveal: 0..1 of the unfolded panel shown, for the unfold animation
              "offset": None, "offset_hold": 0.0,  # a dragged position, kept until the daemon confirms it
-             "drag": None, "pinned": False}       # drag: (pointer x at press, offset then); pinned: stays unfolded
+             "drag": None, "pinned": False, "expanded_usage": set()}       # drag: (pointer x at press, offset then); pinned: stays unfolded
 
     def position() -> str:
         pos = str(state["options"].get("position") or "top")
@@ -888,9 +921,7 @@ def run_child() -> int:
                 if pos == "bottom":
                     y = sh - shown
                 h = shown
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        photo = tk.PhotoImage(data=buf.getvalue())
+        photo = ImageTk.PhotoImage(img, master=root)
         state["photo"] = photo  # keep a reference or Tk drops the picture
         label.configure(image=photo)
         win.geometry(f"{w}x{h}+{x}+{y}")
@@ -901,7 +932,7 @@ def run_child() -> int:
         except tk.TclError:
             win.withdraw()
 
-    def draw():
+    def draw(*, refresh: bool = True):
         zones = state["zones"]
         opts = state["options"]
         idle = opts.get("idle_hide_min")
@@ -909,20 +940,24 @@ def run_child() -> int:
                 (not state["pinned"] and idle_hidden(state["sessions"], int(idle) if isinstance(idle, (int, float)) else 0)):
             hide()
             return
+        if not refresh and state["image"] is not None:
+            show(state["image"])
+            return
         flags = {**SHOW_DEFAULTS, **(opts.get("show") if isinstance(opts.get("show"), dict) else {})}
         shown_sessions = visible_sessions(state["sessions"], opts)
         rows = apply_show(session_rows(shown_sessions), flags)
         bar_rows = apply_show(session_rows(shown_sessions, prioritize=False), flags)
-        usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"))
+        usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"), opts)
         # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
         fills = [r[3] for r in bar_rows] if len(bar_rows) == len(runs(zones)) else None
         left = state["pulse_until"] - time.time()
         gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
         accents = bar_accents(bar_rows, flags.get("accent", True)) if fills is not None else None
-        show(render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
+        state["image"] = render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
                     flip=position() == "bottom", glow_gain=gain, size=size(),
                     rounded=state["hover"] and position() in VERTICAL, accents=accents,
-                    theme=str(opts.get("theme") or "dynamic")))
+                    theme=str(opts.get("theme") or "dynamic"), expanded_usage=state["expanded_usage"])
+        show(state["image"])
         opacity = opts.get("opacity")
         alpha = max(0.3, min(1.0, opacity / 100)) if isinstance(opacity, (int, float)) else ALPHA
         try:
@@ -933,7 +968,7 @@ def run_child() -> int:
     def animate():
         if state["hover"] and state["reveal"] < 1.0:
             state["reveal"] = min(1.0, state["reveal"] + 0.25)
-            draw()
+            draw(refresh=False)
             root.after(16, animate)
 
     def hover(on):
@@ -965,6 +1000,16 @@ def run_child() -> int:
                         forget_session(str(s.get("id", "")))
                 draw()
             return
+        opts = state["options"]
+        flags = {**SHOW_DEFAULTS, **(opts.get("show") if isinstance(opts.get("show"), dict) else {})}
+        usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"), opts)
+        for agent, summary, top_y, _ in usage_layout(usage, len(sessions), state["expanded_usage"], h):
+            if top_y <= y < top_y + ROW:
+                if bar_window(agent, summary):
+                    state["expanded_usage"].symmetric_difference_update({agent})
+                    state["reveal"] = 1.0
+                    draw()
+                return
         if not sessions:
             return
         i = panel_row_at(int(y), len(sessions), h)

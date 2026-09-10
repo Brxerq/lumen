@@ -26,10 +26,10 @@ MAX_LOG_BYTES = 2 * 1024 * 1024
 _mutex = None
 
 
-def redirect_output_to_log(path: Path | None = None) -> bool:
+def redirect_output_to_log(path: Path | None = None, *, force: bool = False) -> bool:
     """A windowed build has no stdout at all (print() would raise); send it to
     the log. Truncate rather than rotate: it's a debugging tail."""
-    if sys.stdout is not None and sys.stderr is not None:
+    if not force and sys.stdout is not None and sys.stderr is not None:
         return False
     path = path or paths.log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,7 +176,7 @@ def run_app(no_tray: bool = False, open_ui: bool | None = None) -> int:
     """The daemon: engine + HTTP server (+ tray). Blocks until quit."""
     from lumen.server.api import serve_in_background
 
-    windowed = redirect_output_to_log()
+    windowed = redirect_output_to_log(force=sys.platform == "win32" and not no_tray)
     if sys.platform == "win32":
         # Own taskbar identity, so Windows uses the app's own icon instead of
         # the host python.exe's and pins the app rather than the interpreter.

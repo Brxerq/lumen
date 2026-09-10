@@ -14,7 +14,6 @@ import os
 import sys
 import threading
 import time
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lumen.integrations.claude_usage import STALE_S, _when
@@ -51,7 +50,7 @@ _lock = threading.Lock()
 _latest: dict | None = None
 _latest_at = 0.0
 _detail = "not checked yet"
-_samples: list[tuple[float, int]] = []
+_samples: list[tuple[float, float]] = []
 
 
 def latest(now: float | None = None) -> dict | None:
@@ -74,7 +73,7 @@ def flat(summary: dict) -> dict:
     """Each percentage as a plain int beside the nested blocks, so a rule can
     say 'daily_used > 80' without reaching into a dict."""
     return {f"{key}_used": block["used"] for key, block in summary.items()
-            if isinstance(block, dict) and isinstance(block.get("used"), int)}
+            if isinstance(block, dict) and isinstance(block.get("used"), (int, float))}
 
 
 def label(key: str) -> str:
@@ -174,10 +173,10 @@ def read_local_antigravity_usage() -> dict | None:
     return None
 
 
-def _pct(used) -> int | None:
+def _pct(used) -> float | None:
     if not isinstance(used, (int, float)) or isinstance(used, bool):
         return None
-    return int(round(max(0.0, min(100.0, float(used)))))
+    return round(max(0.0, min(100.0, float(used))), 2)
 
 
 def summarize(raw: dict, now: float | None = None) -> dict:
@@ -226,23 +225,12 @@ def refresh(now: float | None = None) -> dict | None:
                     _record_sample(now_ts, summary["five_hour"]["used"])
             return summary
 
-    summary = {
-        "daily": {"used": 0, "resets_at": _next_midnight_utc()},
-        "gemini_flash": {"used": 0, "resets_at": None},
-        "gemini_pro": {"used": 0, "resets_at": None},
-    }
     with _lock:
-        _latest, _latest_at, _detail = summary, now_ts, "usage tracked via Google credentials"
-    return summary
+        _detail = "Google / Antigravity quota data unavailable"
+    return latest(now_ts)
 
 
-def _next_midnight_utc() -> float:
-    now = datetime.now(UTC)
-    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return tomorrow.timestamp()
-
-
-def _record_sample(ts: float, used: int) -> None:
+def _record_sample(ts: float, used: float) -> None:
     _samples.append((ts, used))
     if len(_samples) > SAMPLES:
         _samples[:] = _samples[-SAMPLES:]

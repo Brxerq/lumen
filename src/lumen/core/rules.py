@@ -35,9 +35,8 @@ EFFECTS: dict[str, dict] = {
                  "params": ["agent", "per_zone", "palette", "offset", "brightness"]},
 }
 
-# A deeper green stays distinct from white backlighting and the dashboard's
-# light-green accents, while still being bright enough for RGB hardware.
-GREEN, AMBER, RED = (0, 143, 61), (255, 180, 0), (255, 0, 0)
+# Original hardware palette (v0.4): pure green, amber, and red.
+GREEN, AMBER, RED = (0, 255, 0), (255, 180, 0), (255, 0, 0)
 DEFAULT_PALETTE = {"running": AMBER, "input": RED, "done": GREEN}
 
 

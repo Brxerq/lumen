@@ -62,29 +62,31 @@ def turn_open(rollout: Path, session_id: str | None = None) -> bool:
         if size < offset:
             offset, state, has_metadata, belongs = 0, False, False, True  # truncated/rotated
         f.seek(offset)
-        chunk = f.read(size - offset)
-    end = chunk.rfind(b"\n") + 1  # only consume complete lines
-    if not has_metadata:
-        belongs = True
-    for raw in chunk[:end].splitlines():
-        try:
-            entry = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
-        payload = entry.get("payload")
-        payload = payload if isinstance(payload, dict) else {}
-        if entry.get("type") == "session_meta":
-            has_metadata = True
-            belongs = session_id is None or str(payload.get("id") or payload.get("session_id") or "") == session_id
-            continue
-        if entry.get("type") != "event_msg" or not belongs:
-            continue
-        boundary = payload.get("type")
-        if boundary in TURN_OPEN_EVENTS:
-            state = TURN_OPEN_EVENTS[boundary]
-    _scan[rollout] = (offset + end, state, has_metadata, belongs)
+        if not has_metadata:
+            belongs = True
+        while f.tell() < size:
+            raw = f.readline(size - f.tell())
+            if not raw.endswith(b"\n"):
+                break  # retry an incomplete trailing record on the next poll
+            offset = f.tell()
+            try:
+                entry = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            payload = entry.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            if entry.get("type") == "session_meta":
+                has_metadata = True
+                belongs = session_id is None or str(payload.get("id") or payload.get("session_id") or "") == session_id
+                continue
+            if entry.get("type") != "event_msg" or not belongs:
+                continue
+            boundary = payload.get("type")
+            if boundary in TURN_OPEN_EVENTS:
+                state = TURN_OPEN_EVENTS[boundary]
+    _scan[rollout] = (offset, state, has_metadata, belongs)
     return state
 
 

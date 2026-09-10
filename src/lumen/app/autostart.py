@@ -30,6 +30,13 @@ def enabled() -> bool:
     return _unix_file().exists()
 
 
+def launch_background(open_ui: bool = False) -> None:
+    """Release the Windows terminal; the child owns the tray and instance lock."""
+    subprocess.Popen(command() + ["run", "--background"] + (["--open"] if open_ui else []),
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=subprocess.CREATE_NO_WINDOW, close_fds=True)
+
+
 def set_enabled(value: bool) -> None:
     if sys.platform == "win32":
         import winreg
