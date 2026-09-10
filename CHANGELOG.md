@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-11
+
+### Added
+- Liquid Mercury Drop (Organic Fluid Teardrop) notch theme featuring fluid organic geometry, specular glass reflection, concentric liquid ripple status dots, dynamic liquid badges, and interactive controls.
+- Notch multi-theme support with five selectable styles: Liquid Mercury (`liquid`), Dynamic Island (`dynamic`), ROG Cyberpunk (`rog`), Minimal Float (`minimal`), and Studio Glass (`studio`).
+- Google and Gemini quota tracking alongside Antigravity active session monitoring (`google_usage`, `gemini`).
+- Notch theme selector directly in the Dashboard Settings tab.
+
+### Changed
+- Range sliders in the dashboard now feature custom styled glowing circular knobs, tactile metallic bevels, active scale effects, and real-time drag updates.
+- ASUS ROG Aura RGB keyboards run at full hardware brightness with wake-from-sleep retry logic and raw byte frame passthrough.
+- Dashboard keypad preview features enhanced backlight glow and keycap contrast to eliminate washed-out appearance.
+
 ## [0.7.9] — 2026-09-09
 
 ### Fixed

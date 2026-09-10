@@ -15,20 +15,17 @@
      carrying the smallest text on the page. This clears 4.5:1 on every surface
      it is used on (panel 5.8, panel-2 5.3, panel-3 4.7). */
   --dim: #8b93a5;
-  --green: #4ade80;
-  --green-2: #22c55e;
-  --amber: #fbbf24;
-  --red: #f87171;
-  --blue: #60a5fa;
-  --cyan: #22d3ee;
-  /* The accents as *text*, as opposed to as a fill. On the dark surfaces they
-     are the accents themselves; the light theme overrides them with darker
-     mixes, because a colour that reads fine as a chip fill sits near 3:1 when
-     it becomes the label inside that chip. */
-  --green-ink: #4ade80;
-  --amber-ink: #fbbf24;
-  --red-ink: #f87171;
-  --cyan-ink: #22d3ee;
+  --green: #22c55e;
+  --green-2: #16a34a;
+  --amber: #f97316;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --cyan: #06b6d4;
+  /* The accents as *text*, as opposed to as a fill. */
+  --green-ink: #22c55e;
+  --amber-ink: #f97316;
+  --red-ink: #ef4444;
+  --cyan-ink: #06b6d4;
   /* Two stacks, no webfont request: headings reach for a geometric sans close to
      the wordmark (Outfit itself if the user has it), text stays on the neutral
      UI face of the platform. */
@@ -237,10 +234,12 @@ body { font-variant-numeric: tabular-nums; caret-color: var(--green); }
 /* A keyboard's zones get a key grid, a light bar gets one continuous pill, so
    the two devices are told apart at a glance instead of by reading the label. */
 .zones.keys { height: 104px; }
-.zones.keys i::before { content: ""; position: absolute; inset: 0; opacity: .16;
-  background-image: linear-gradient(to right, rgba(0, 0, 0, .9) 1px, transparent 1px), linear-gradient(rgba(0, 0, 0, .9) 1px, transparent 1px);
-  background-size: 15px 15px; background-position: 3px 3px; }
-.zones.keys i.dark::before { opacity: .5; }
+.zones.keys i { box-shadow: inset 0 0 20px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .22), 0 4px 14px rgba(0, 0, 0, .2); }
+.zones.keys i::before { content: ""; position: absolute; inset: 0; opacity: .22;
+  background-image: linear-gradient(to right, rgba(0, 0, 0, .8) 2px, transparent 2px), linear-gradient(rgba(0, 0, 0, .8) 2px, transparent 2px);
+  background-size: 16px 16px; background-position: 2px 2px; }
+.zones.keys i::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .16), transparent 70%); pointer-events: none; }
+.zones.keys i.dark::before { opacity: .55; }
 .zones.bar { height: 44px; gap: 4px; border-radius: 999px; padding: 6px; }
 .zones.bar i { border-radius: 999px; }
 .zones.bar i em { display: none; }
@@ -585,12 +584,102 @@ kbd { font-family: var(--mono); font-size: var(--fs-xs); background: var(--panel
 .chip-btn:hover { color: var(--text); background: var(--panel-2); }
 .chip-btn.on { color: var(--text); background: var(--panel-3); border-color: var(--dim); font-weight: 600; }
 
+/* --- range sliders & knobs ------------------------------------------------ */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 24px;
+  vertical-align: middle;
+}
+input[type="range"]:focus {
+  outline: none;
+}
+
+/* WebKit Track */
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 8px;
+  background: var(--panel-3);
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: background .15s ease, border-color .15s ease;
+}
+input[type="range"]:hover::-webkit-slider-runnable-track {
+  background: #252d3d;
+  border-color: var(--dim);
+}
+
+/* WebKit Thumb / Knob */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -6px; /* center thumb on 8px track: (8 - 20) / 2 */
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffffff 0%, #e2e8f0 70%, #cbd5e1 100%);
+  border: 2px solid var(--green);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  cursor: grab;
+  transition: transform .12s cubic-bezier(.34, 1.56, .64, 1), box-shadow .15s ease, border-color .15s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.18);
+  border-color: #4ade80;
+  box-shadow: 0 3px 10px rgba(34, 197, 94, 0.45), 0 0 0 4px rgba(34, 197, 94, 0.2);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.24);
+  border-color: var(--green);
+  box-shadow: 0 2px 12px rgba(34, 197, 94, 0.7), 0 0 0 5px rgba(34, 197, 94, 0.35);
+}
+
+/* Firefox Track */
+input[type="range"]::-moz-range-track {
+  width: 100%;
+  height: 8px;
+  background: var(--panel-3);
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: background .15s ease, border-color .15s ease;
+}
+input[type="range"]:hover::-moz-range-track {
+  background: #252d3d;
+  border-color: var(--dim);
+}
+
+/* Firefox Thumb / Knob */
+input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffffff 0%, #e2e8f0 70%, #cbd5e1 100%);
+  border: 2px solid var(--green);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  cursor: grab;
+  transition: transform .12s cubic-bezier(.34, 1.56, .64, 1), box-shadow .15s ease, border-color .15s ease;
+}
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.18);
+  border-color: #4ade80;
+  box-shadow: 0 3px 10px rgba(34, 197, 94, 0.45), 0 0 0 4px rgba(34, 197, 94, 0.2);
+}
+input[type="range"]:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.24);
+  border-color: var(--green);
+  box-shadow: 0 2px 12px rgba(34, 197, 94, 0.7), 0 0 0 5px rgba(34, 197, 94, 0.35);
+}
+
 /* --- per-device dimmer ---------------------------------------------------- */
-.dimmer { display: inline-flex; align-items: center; gap: 9px; }
-/* A range track is 16px tall by default — a thin target for a control people
-   drag. The extra height is hit area, the thumb is unchanged. */
-.dimmer input[type="range"] { width: 100px; height: 24px; accent-color: var(--green-2); }
-.dimmer .dim { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; font-size: var(--fs-sm); }
+.dimmer { display: inline-flex; align-items: center; gap: 10px; }
+.dimmer input[type="range"] { width: 112px; }
+.dimmer .dim { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
 
 /* Visible to screen readers, not to eyes: labels for icon-only controls. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;

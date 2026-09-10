@@ -49,6 +49,18 @@ def init_direct_report() -> bytes:
     return report(0x5D, 0xBC)
 
 
+def calibrate_led(c: tuple[int, int, int], gamma: float = 1.8) -> tuple[int, int, int]:
+    """Perceptual gamma curve: prevents green channel blowout, deepens saturation,
+    and eliminates washed-out, pale appearance on laptop RGB keyboard LEDs."""
+    r, g, b = c
+    if r == 0 and g == 0 and b == 0:
+        return (0, 0, 0)
+    cr = int(round(255.0 * ((max(0, min(255, r)) / 255.0) ** gamma)))
+    cg = int(round(255.0 * ((max(0, min(255, g)) / 255.0) ** gamma)))
+    cb = int(round(255.0 * ((max(0, min(255, b)) / 255.0) ** gamma)))
+    return (max(0, min(255, cr)), max(0, min(255, cg)), max(0, min(255, cb)))
+
+
 def frame_report(keyboard: list[tuple[int, int, int]], lightbar: list[tuple[int, int, int]]) -> bytes:
     kb = (list(keyboard) + [keyboard[-1]] * KEYBOARD_ZONES)[:KEYBOARD_ZONES]
     lb = (list(lightbar) + [lightbar[-1]] * LIGHTBAR_ZONES)[:LIGHTBAR_ZONES]
@@ -70,19 +82,28 @@ class AuraController:
         import hid
         dev = hid.device()
         dev.open_path(self.path)
-        dev.send_feature_report(brightness_report())
+        dev.send_feature_report(brightness_report(3))
         dev.send_feature_report(init_direct_report())
         return dev
 
     def flush(self) -> None:
         with self._lock:
             if self._dev is None:
-                self._dev = self._open()
+                try:
+                    self._dev = self._open()
+                except Exception:
+                    return
             try:
                 self._dev.send_feature_report(frame_report(self.keyboard, self.lightbar))
             except (OSError, ValueError):
                 self.close()
-                raise
+                # On wake-from-sleep or interface reset, retry once cleanly
+                try:
+                    self._dev = self._open()
+                    self._dev.send_feature_report(frame_report(self.keyboard, self.lightbar))
+                except Exception:
+                    self.close()
+                    raise
 
     def close(self) -> None:
         with self._lock:

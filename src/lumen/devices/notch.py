@@ -55,14 +55,20 @@ POSITIONS = ("top", "top-left", "top-right", "bottom", "left", "right")
 VERTICAL = ("left", "right")  # the folded tab is turned on its side; the panel opens upright
 # One accent per agent, as a cap on its bar: which agent a bar is at a glance,
 # whatever state colour the bar itself has.
-AGENT_ACCENT: dict[str, RGB] = {"claude": (217, 119, 87), "codex": (120, 150, 255)}
+AGENT_ACCENT: dict[str, RGB] = {
+    "claude": (217, 119, 87),
+    "codex": (120, 150, 255),
+    "gemini": (66, 133, 244),
+    "google": (66, 133, 244),
+    "antigravity": (66, 133, 244),
+}
 # Thin, regular, thick: the folded tab's height, its bar height and its width.
 # The unfolded panel keeps its own row height; only the tab itself scales.
 SIZES = {"thin": (16, 4, 200), "regular": (HEIGHT, BAR_H, WIDTH), "thick": (34, 8, 280)}
 # Everything the tab can show, all on by default. Settings turns pieces off:
 # someone who only wants the Claude limits and the live tabs unticks the rest.
 SHOW_DEFAULTS = {"sessions": True, "context": True, "cost": True, "activity": True,
-                 "claude_usage": True, "codex_usage": True, "accent": True, "usage_follows_tabs": False}
+                 "claude_usage": True, "codex_usage": True, "gemini_usage": True, "accent": True, "usage_follows_tabs": False}
 PULSE_S = 1.6                # a tab that just started waiting on you breathes this long
 
 
@@ -101,7 +107,8 @@ class Notch(ScreenGlow):
         self.completed_hide_min = 30      # retire completed rows; running and input rows always stay visible
         self.port = 6733                  # the dashboard, so a drag can save its new place
         self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
-        self.agents = "all"               # whose sessions: all | claude | codex
+        self.agents = "all"               # whose sessions: all | claude | codex | gemini
+        self.theme = "liquid"             # liquid | dynamic | minimal | rog | studio
 
     def child_command(self) -> list[str]:
         return child_command()
@@ -110,11 +117,12 @@ class Notch(ScreenGlow):
         self.set_zones([tuple(rgb)] * ZONE_COUNT)
 
     def set_zones(self, colors: list[RGB]) -> None:
-        from lumen.integrations import claude_usage, codex_usage
+        from lumen.integrations import claude_usage, codex_usage, google_usage
         from lumen.integrations.agent_sessions import all_sessions
         payload = {"sessions": all_sessions(),
-                   "usage": {"claude": claude_usage.latest(), "codex": codex_usage.latest()},
+                   "usage": {"claude": claude_usage.latest(), "codex": codex_usage.latest(), "gemini": google_usage.latest()},
                    "options": {"position": self.position, "offset": self.offset, "size": self.size,
+                               "theme": getattr(self, "theme", "liquid"),
                                "opacity": self.opacity, "port": self.port, "hide_fullscreen": self.hide_fullscreen,
                                "idle_hide_min": self.idle_hide_min,
                                "completed_hide_min": self.completed_hide_min,
@@ -146,13 +154,15 @@ def discover(settings: dict | None = None) -> list:
     _instance.offset = max(-1, min(100, int(s.get("notch_offset", -1) or -1)))
     size = str(s.get("notch_size") or "regular")
     _instance.size = size if size in SIZES else "regular"
+    theme = str(s.get("notch_theme") or "liquid")
+    _instance.theme = theme if theme in ("liquid", "dynamic", "minimal", "rog", "studio") else "liquid"
     _instance.opacity = max(30, min(100, int(s.get("notch_opacity", 96) or 96)))
     _instance.port = int(s.get("port", 6733) or 6733)
     _instance.idle_hide_min = max(0, int(s.get("notch_idle_hide_min", 0) or 0))
     _instance.completed_hide_min = max(0, int(s.get("notch_completed_hide_min", 30) or 0))
     _instance.show = {k: bool((settings or {}).get(f"notch_show_{k}", v)) for k, v in SHOW_DEFAULTS.items()}
     agents = str((settings or {}).get("notch_agents") or "all")
-    _instance.agents = agents if agents in ("all", "claude", "codex") else "all"
+    _instance.agents = agents if agents in ("all", "claude", "codex", "gemini") else "all"
     _instance.connected = True
     _instance.warm_up()
     return [_instance]
@@ -378,7 +388,8 @@ def usage_colour(pct: int) -> RGB:
 def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
            opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
            unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0,
-           size: str = "regular", rounded: bool = False, accents: list[RGB | None] | None = None):
+           size: str = "regular", rounded: bool = False, accents: list[RGB | None] | None = None,
+           theme: str = "dynamic"):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
     platform can't do per-pixel alpha). `unfolded` = the hover panel: session
     rows, then the usage meters. `fills` is one context-window percentage per
@@ -400,30 +411,69 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
     meters = []
     if unfolded:
         for agent, summary in by_agent.items():
-            for k in ordered(summary):
-                name = label(k)
-                if len(by_agent) > 1:  # "Claude · 5 hours", "Codex · 7 days"
-                    name = agent.capitalize() + " · " + name.split(" · ", 1)[1]
+            if agent in ("gemini", "google"):
+                from lumen.integrations import google_usage
+                ord_fn, lbl_fn = google_usage.ordered, google_usage.label
+            else:
+                ord_fn, lbl_fn = ordered, label
+            for k in ord_fn(summary):
+                name = lbl_fn(k)
+                if len(by_agent) > 1 and not name.startswith(agent.capitalize()):
+                    name = ("Antigravity" if agent == "gemini" else agent.capitalize()) + " · " + (name.split(" · ", 1)[1] if " · " in name else name)
                 meters.append((name, summary[k]))
-    five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "seven_day") if k in s), None)
+    five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "daily", "seven_day") if k in s), None)
+    five_key = next((k for s in by_agent.values() for k in ("five_hour", "daily", "seven_day") if k in s), None)
+    five_lbl = "24h" if five_key == "daily" else ("7d" if five_key == "seven_day" else "5h")
+
+    BTN_H = 22
     w = PANEL_WIDTH if unfolded else width
     h = height
     if unfolded:
-        h += PANEL_PAD + ROW * len(rows) + (PANEL_PAD // 2 + ROW * len(meters) if meters else 0) + PANEL_PAD - 6
-    W, H, R = w * SS, h * SS, RADIUS * SS
+        h += PANEL_PAD + ROW * len(rows) + (PANEL_PAD // 2 + ROW * len(meters) if meters else 0) + (PANEL_PAD + BTN_H) + PANEL_PAD - 8
+    W, H = w * SS, h * SS
+
+    # Theme aesthetics: shell fill, stroke edge, and corner radius
+    if theme == "liquid":
+        shell_fill = (8, 10, 15)
+        edge_stroke = (190, 215, 255, 45)  # Liquid mercury rim
+        corner_r = (24 if not unfolded else 32) * SS
+    elif theme == "rog":
+        shell_fill = (8, 10, 14)
+        edge_stroke = (0, 240, 255, 65)  # Cyber neon cyan edge
+        corner_r = 4 * SS
+    elif theme == "minimal":
+        shell_fill = (15, 16, 20)
+        edge_stroke = (255, 255, 255, 12)
+        corner_r = 8 * SS
+    elif theme == "studio":
+        shell_fill = (24, 25, 30)
+        edge_stroke = (255, 255, 255, 36)
+        corner_r = 14 * SS
+    else:  # dynamic
+        shell_fill = SHELL
+        edge_stroke = EDGE
+        corner_r = RADIUS * SS
+
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
     # shell: flat on the screen-edge side, rounded on the other — it hangs from the edge
     if rounded:
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=R, fill=SHELL + (255,))
-        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 - SS), radius=R - SS, outline=EDGE, width=SS)
+        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=corner_r, fill=shell_fill + (255,))
+        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 - SS), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
     elif flip:
-        d.rounded_rectangle((0, 0, W - 1, H - 1 + R), radius=R, fill=SHELL + (255,))
-        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 + R), radius=R - SS, outline=EDGE, width=SS)
+        d.rounded_rectangle((0, 0, W - 1, H - 1 + corner_r), radius=corner_r, fill=shell_fill + (255,))
+        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 + corner_r), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
     else:
-        d.rounded_rectangle((0, -R, W - 1, H - 1), radius=R, fill=SHELL + (255,))
-        d.rounded_rectangle((SS, -R, W - 1 - SS, H - 1 - SS), radius=R - SS, outline=EDGE, width=SS)
+        d.rounded_rectangle((0, -corner_r, W - 1, H - 1), radius=corner_r, fill=shell_fill + (255,))
+        d.rounded_rectangle((SS, -corner_r, W - 1 - SS, H - 1 - SS), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
+
+    # Specular liquid glass highlights for liquid theme
+    if theme == "liquid":
+        spec_y = 5 * SS if not flip else H - 7 * SS
+        spec_w = max(50 * SS, W // 3)
+        d.rounded_rectangle(((W - spec_w) // 2, spec_y, (W + spec_w) // 2, spec_y + 2 * SS),
+                            radius=SS, fill=(255, 255, 255, 75))
 
     # session bars, each lit from beneath
     bars = runs(zones)
@@ -460,16 +510,17 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 d.ellipse((x - SS, y0 - SS, x - SS + cap, y0 - SS + cap), fill=accent + (255,))
             x = x1 + gap
 
-    if five is not None and not unfolded:  # "5h 23%" at the right of the folded tab
+    if five is not None and not unfolded:  # "5h 23%" / "24h 0%" at the right of the folded tab
         f = _font(11 * SS, bold=True)
         colour = usage_colour(int(five))
         d.text((W - BAR_INSET * SS, height * SS // 2), f"{int(five)}%", font=f, fill=colour + (255,), anchor="rm")
         px = d.textlength(f"{int(five)}%", font=f)
-        d.text((W - BAR_INSET * SS - px - 5 * SS, height * SS // 2), "5h", font=_font(10 * SS),
+        d.text((W - BAR_INSET * SS - px - 5 * SS, height * SS // 2), five_lbl, font=_font(10 * SS),
                fill=MUTED + (255,), anchor="rm")
 
     if unfolded:
         name_f, meta_f = _font(12 * SS, bold=True), _font(12 * SS)
+        badge_f = _font(10 * SS, bold=True)
         d.line((BAR_INSET * SS, height * SS + 2 * SS, W - BAR_INSET * SS, height * SS + 2 * SS), fill=EDGE, width=SS)
         y = (height + PANEL_PAD) * SS
         if not rows and not meters:
@@ -479,10 +530,44 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
             activity = row[4] if len(row) > 4 else ""
             cost = row[5] if len(row) > 5 else None
             colour = tuple(palette.get(status, MUTED[:3]))
+            accent = AGENT_ACCENT.get(agent, (140, 143, 154))
             cy = y + ROW * SS // 2
-            d.ellipse((BAR_INSET * SS, cy - 4 * SS, BAR_INSET * SS + 8 * SS, cy + 4 * SS), fill=colour + (255,))
-            d.text((BAR_INSET * SS + 18 * SS, cy), agent.capitalize(), font=name_f, fill=INK + (255,), anchor="lm")
-            nx = d.textlength(agent.capitalize(), font=name_f)
+            # Status indicator
+            if theme == "liquid":
+                d.ellipse((BAR_INSET * SS - 2 * SS, cy - 6 * SS, BAR_INSET * SS + 10 * SS, cy + 6 * SS),
+                          outline=colour + (70,), width=SS)
+                d.ellipse((BAR_INSET * SS, cy - 4 * SS, BAR_INSET * SS + 8 * SS, cy + 4 * SS), fill=colour + (255,))
+            else:
+                d.ellipse((BAR_INSET * SS, cy - 4 * SS, BAR_INSET * SS + 8 * SS, cy + 4 * SS), fill=colour + (255,))
+
+            # Agent badge pill
+            agent_tag = "Antigravity" if agent in ("gemini", "antigravity") else agent.capitalize()
+            if theme == "liquid":
+                tag_w = d.textlength(agent_tag, font=badge_f)
+                d.rounded_rectangle((BAR_INSET * SS + 14 * SS, cy - 8 * SS, BAR_INSET * SS + 24 * SS + tag_w, cy + 8 * SS),
+                                    radius=7 * SS, fill=accent + (45,), outline=(190, 215, 255, 80), width=SS)
+                d.line((BAR_INSET * SS + 17 * SS, cy - 6 * SS, BAR_INSET * SS + 21 * SS + tag_w, cy - 6 * SS),
+                       fill=(255, 255, 255, 90), width=SS)
+                d.text((BAR_INSET * SS + 19 * SS, cy), agent_tag, font=badge_f, fill=INK + (255,), anchor="lm")
+                nx = tag_w + 10 * SS
+            elif theme == "rog":
+                agent_tag = f"[{agent_tag.upper()}]"
+                tag_w = d.textlength(agent_tag, font=badge_f)
+                d.rectangle((BAR_INSET * SS + 14 * SS, cy - 7 * SS, BAR_INSET * SS + 22 * SS + tag_w, cy + 7 * SS),
+                            fill=(0, 0, 0, 160), outline=accent + (200,), width=SS)
+                d.text((BAR_INSET * SS + 18 * SS, cy), agent_tag, font=badge_f, fill=accent + (255,), anchor="lm")
+                nx = tag_w + 8 * SS
+            elif theme == "minimal":
+                tag_w = d.textlength(agent_tag, font=badge_f)
+                d.text((BAR_INSET * SS + 14 * SS, cy), agent_tag, font=badge_f, fill=accent + (255,), anchor="lm")
+                nx = tag_w
+            else:  # dynamic & studio
+                tag_w = d.textlength(agent_tag, font=badge_f)
+                d.rounded_rectangle((BAR_INSET * SS + 14 * SS, cy - 8 * SS, BAR_INSET * SS + 22 * SS + tag_w, cy + 8 * SS),
+                                    radius=4 * SS, fill=accent + (40,), outline=accent + (95,), width=SS)
+                d.text((BAR_INSET * SS + 18 * SS, cy), agent_tag, font=badge_f, fill=INK + (255,), anchor="lm")
+                nx = tag_w + 8 * SS
+
             label = cast(str, LABELS.get(status, status))
             d.text((W - BAR_INSET * SS, cy), label, font=meta_f, fill=colour + (255,), anchor="rm")
             right = W - BAR_INSET * SS - d.textlength(label, font=meta_f) - 12 * SS
@@ -492,14 +577,14 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 right -= d.textlength(meta, font=meta_f) + 12 * SS
             # name, then what the tab is doing right now; clipped to the room that is left
             text = folder + (f"  ·  {activity}" if activity and status == "running" else "")
-            x0 = BAR_INSET * SS + 18 * SS + nx + 10 * SS
+            x0 = BAR_INSET * SS + 22 * SS + nx + 8 * SS
             while text and d.textlength(text, font=meta_f) > right - x0:
                 text = text[:-2].rstrip() + "…" if len(text) > 2 else ""
             d.text((x0, cy), text, font=meta_f, fill=MUTED + (255,), anchor="lm")
             y += ROW * SS
         if meters:  # the subscription limits: a label, a thin meter, the number and the reset time
             if rows:
-                d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=EDGE, width=SS)
+                d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=edge_stroke, width=SS)
                 y += PANEL_PAD * SS // 2
             small = _font(11 * SS)
             for name, block in meters:
@@ -515,6 +600,39 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 fw = max(METER_H * SS, (mx1 - mx0) * pct / 100)
                 d.rounded_rectangle((mx0, my, mx0 + fw, my + METER_H * SS), radius=METER_H * SS // 2, fill=colour + (255,))
                 y += ROW * SS
+
+        # Bottom quick action controls: [ ⚡ Dashboard ] [ ✕ Clear Done ]
+        d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=edge_stroke, width=SS)
+        btn_y = y + 7 * SS
+        btn_f = _font(11 * SS, bold=True)
+        btn_w = (W - 2 * BAR_INSET * SS - 10 * SS) // 2
+        # Dashboard button
+        b1_x0, b1_x1 = BAR_INSET * SS, BAR_INSET * SS + btn_w
+        b2_x0, b2_x1 = b1_x1 + 10 * SS, W - BAR_INSET * SS
+        if theme == "liquid":
+            btn_r = 10 * SS
+            d.rounded_rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), radius=btn_r,
+                                 fill=(22, 26, 36, 220), outline=(190, 215, 255, 60), width=SS)
+            d.line((b1_x0 + 8 * SS, btn_y + 2 * SS, b1_x1 - 8 * SS, btn_y + 2 * SS), fill=(255, 255, 255, 75), width=SS)
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ Dashboard", font=btn_f, fill=INK + (255,), anchor="mm")
+
+            d.rounded_rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), radius=btn_r,
+                                 fill=(22, 26, 36, 220), outline=(190, 215, 255, 60), width=SS)
+            d.line((b2_x0 + 8 * SS, btn_y + 2 * SS, b2_x1 - 8 * SS, btn_y + 2 * SS), fill=(255, 255, 255, 75), width=SS)
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ Clear Done", font=btn_f, fill=MUTED + (255,), anchor="mm")
+        elif theme == "rog":
+            d.rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), fill=(0, 240, 255, 20), outline=(0, 240, 255, 90), width=SS)
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ DASHBOARD", font=btn_f, fill=(0, 240, 255, 255), anchor="mm")
+            d.rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), fill=(255, 0, 85, 20), outline=(255, 0, 85, 90), width=SS)
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ CLEAR DONE", font=btn_f, fill=(255, 120, 150, 255), anchor="mm")
+        else:
+            btn_r = 4 * SS if theme == "minimal" else 8 * SS if theme == "studio" else 6 * SS
+            d.rounded_rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), radius=btn_r,
+                                 fill=(255, 255, 255, 14), outline=edge_stroke, width=SS)
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ Dashboard", font=btn_f, fill=INK + (255,), anchor="mm")
+            d.rounded_rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), radius=btn_r,
+                                 fill=(255, 255, 255, 14), outline=edge_stroke, width=SS)
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ Clear Done", font=btn_f, fill=MUTED + (255,), anchor="mm")
 
     img = img.resize((w, h), LANCZOS_FILTER)
     if opaque_key is not None:
@@ -590,8 +708,40 @@ def focus_pid(pid: int) -> bool:
 
 
 def focus_session(session: dict) -> bool:
-    """Click on a row: raise the terminal that tab lives in. Codex has no pid file we know of, so only Claude."""
-    if session.get("agent") == "codex":
+    """Click on a row: raise the terminal/editor that tab lives in. Works for Claude, and now for Antigravity/Gemini on Windows/macOS!"""
+    agent = session.get("agent")
+    if agent in ("gemini", "antigravity", "google"):
+        if sys.platform == "win32":
+            import ctypes
+            user32 = ctypes.windll.user32
+            title = str(session.get("title") or "")
+            conv_id = str(session.get("id") or "")
+            found: list[int] = []
+
+            @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            def enum_proc(hwnd, _):
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length == 0:
+                    return True
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buff, length + 1)
+                w_title = buff.value
+                if "Antigravity" in w_title or (title and title in w_title) or (conv_id and conv_id[:8] in w_title):
+                    found.append(hwnd)
+                    return False
+                return True
+
+            user32.EnumWindows(enum_proc, 0)
+            if found:
+                hwnd = found[0]
+                user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                user32.SetForegroundWindow(hwnd)
+                return True
+        return False
+
+    if agent == "codex":
         return False
     pid = session_pids().get(str(session.get("id", "")))
     if pid is None:
@@ -637,11 +787,14 @@ def fullscreen_app_in_front() -> bool:
 def self_check() -> bool:
     """One frame of each state, drawn off-screen: what CI runs instead of opening a window."""
     from lumen.core.rules import DEFAULT_PALETTE
-    rows = [("claude", "check", "running", 42, "Editing api.py", 0.5), ("codex", "check", "input", None, "", None)]
-    usage = {"five_hour": {"used": 23, "resets_at": None}, "seven_day": {"used": 72, "resets_at": None}}
-    zones = [(240, 170, 40)] * 3 + [(230, 60, 60)] * 3
-    a = render(zones, rows, DEFAULT_PALETTE, KEY, [42, None], usage)
-    b = render(zones, rows, DEFAULT_PALETTE, None, [42, None], usage, unfolded=True, flip=True, glow_gain=1.5)
+    rows = [("claude", "check", "running", 42, "Editing api.py", 0.5),
+            ("codex", "check", "input", None, "", None),
+            ("gemini", "check", "done", 10, "Planning", None)]
+    usage = {"five_hour": {"used": 23, "resets_at": None}, "seven_day": {"used": 72, "resets_at": None},
+             "gemini": {"daily": {"used": 15}}}
+    zones = [(240, 170, 40)] * 2 + [(230, 60, 60)] * 2 + [(0, 240, 48)] * 2
+    a = render(zones, rows, DEFAULT_PALETTE, KEY, [42, None, 10], usage)
+    b = render(zones, rows, DEFAULT_PALETTE, None, [42, None, 10], usage, unfolded=True, flip=True, glow_gain=1.5)
     return a.size == (WIDTH, HEIGHT) and b.size[0] == PANEL_WIDTH and b.size[1] > HEIGHT
 
 
@@ -768,7 +921,8 @@ def run_child() -> int:
         accents = bar_accents(bar_rows, flags.get("accent", True)) if fills is not None else None
         show(render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
                     flip=position() == "bottom", glow_gain=gain, size=size(),
-                    rounded=state["hover"] and position() in VERTICAL, accents=accents))
+                    rounded=state["hover"] and position() in VERTICAL, accents=accents,
+                    theme=str(opts.get("theme") or "dynamic")))
         opacity = opts.get("opacity")
         alpha = max(0.3, min(1.0, opacity / 100)) if isinstance(opacity, (int, float)) else ALPHA
         try:
@@ -793,15 +947,31 @@ def run_child() -> int:
                 root.after(16, animate)
 
     def clicked(event):
-        sessions = visible_sessions(state["sessions"], state["options"])
-        if not state["hover"] or not sessions:
+        if not state["hover"]:
             return
-        y = event.y if position() != "bottom" else event.y  # the image is not mirrored, only anchored
-        i = panel_row_at(int(y), len(sessions), SIZES[size()][0])
-        if i is None:
+        port = state["options"].get("port", 6733)
+        y, x = event.y, event.x
+        h = SIZES[size()][0]
+        sessions = visible_sessions(state["sessions"], state["options"])
+        total_h = win.winfo_height()
+        if y >= total_h - 34:
+            if x < PANEL_WIDTH // 2:
+                import webbrowser
+                webbrowser.open(f"http://127.0.0.1:{port}/")
+            else:
+                from lumen.integrations.agent_sessions import forget_session
+                for s in list(sessions):
+                    if s.get("status") == "done":
+                        forget_session(str(s.get("id", "")))
+                draw()
+            return
+        if not sessions:
+            return
+        i = panel_row_at(int(y), len(sessions), h)
+        if i is None or i >= len(sessions):
             return
         session = sessions[i]
-        if session.get("agent") == "claude":
+        if session.get("agent") in ("claude", "gemini", "google", "antigravity"):
             threading.Thread(target=focus_session, args=(session,), daemon=True).start()
 
     # Drag the tab along its edge to put it anywhere; letting go saves the spot

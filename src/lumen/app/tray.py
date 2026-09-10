@@ -150,9 +150,17 @@ def run_tray(engine: Engine, port: int, stop: threading.Event, icon_ref: list | 
             icon.title = "Lumen — paused" if engine.paused else f"Lumen — {len(engine.devices)} devices"
             time.sleep(1.0)
 
+    def toggle_notch(item):
+        new_val = not item.checked
+        engine.config.set({"notch": new_val})
+        engine.apply_settings()
+
     icon.menu = pystray.Menu(
         pystray.MenuItem("Open dashboard", lambda: open_dashboard(port), default=True),
         pystray.MenuItem("Paused", lambda _i, item: engine.set_paused(not item.checked), checked=lambda _: engine.paused),
+        pystray.MenuItem("Notch status tab", lambda _i, item: toggle_notch(item),
+                         checked=lambda _: bool(engine.config.settings.get("notch", True))),
+        pystray.MenuItem("Reconnect devices", lambda: engine.scan()),
         pystray.MenuItem("Start at login", lambda _i, item: autostart.set_enabled(not item.checked),
                          checked=lambda _: autostart.enabled()),
         pystray.MenuItem("Open log", open_log),

@@ -21,6 +21,7 @@ from lumen.core.events import Event
 BUILTIN_INTEGRATIONS = [
     "lumen.integrations.claude_code",
     "lumen.integrations.codex",
+    "lumen.integrations.gemini",
     "lumen.integrations.webhook",
     "lumen.integrations.terminal",
     "lumen.integrations.github",

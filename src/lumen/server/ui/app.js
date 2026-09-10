@@ -8,7 +8,7 @@ const basename = p => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop(
 // Long working directories are noise; the last two segments say where you are,
 // and the full path is still on the title attribute.
 const shortPath = p => { const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/); const sep = String(p || "").includes("\\") ? "\\" : "/"; return parts.length > 2 ? "…" + sep + parts.slice(-2).join(sep) : p; };
-const PRESETS = ["#008f3d", "#ffc23d", "#ff5d5d", "#5b9dff", "#4dd0e1", "#c084fc", "#ffffff"];
+const PRESETS = ["#00f030", "#ff6000", "#ff1010", "#4285f4", "#4dd0e1", "#c084fc", "#ffffff"];
 // Feed filters. Each is a prefix test on the event type, so a new event family
 // falls into "Everything else" instead of disappearing.
 const FEED_FILTERS = [["", "All"], ["agent", "Agents"], ["build,deploy", "Builds"], ["command,timer", "Commands"], ["other", "Everything else"]];
@@ -20,7 +20,7 @@ const feedMatch = (type, filter) => {
 const THEMES = [["auto", "Match my system"], ["dark", "Always dark"], ["light", "Always light"]];
 // The agents Lumen can tell apart. A device can be pointed at one of them
 // ("Codex on the keyboard, Claude on the light bar") or at all of them.
-const AGENTS = [["claude", "Claude"], ["codex", "Codex"]];
+const AGENTS = [["claude", "Claude"], ["codex", "Codex"], ["gemini", "Gemini / Antigravity"]];
 const agentName = a => (AGENTS.find(([id]) => id === a) || [a, "every agent"])[1];
 function applyTheme(name) {
   try { localStorage.setItem("lumen-theme", name); } catch (e) { /* private window */ }
@@ -337,7 +337,7 @@ function deviceLayout(st, id) {
   const act = deviceSessionAction(st, id);
   return act ? act.per_zone !== false : true;
 }
-const sessionName = s => s.label || basename(s.cwd) || s.title || ((s.agent === "codex" ? "Codex" : "Claude") + " tab");
+const sessionName = s => s.label || basename(s.cwd) || s.title || ((s.agent === "gemini" ? "Antigravity" : s.agent === "codex" ? "Codex" : "Claude") + " tab");
 
 // The live board is the point of the whole app: what colour is on the hardware
 // this second. Big, on its own, above everything else.
@@ -526,7 +526,7 @@ function renderDevices(st) {
     </div>
     <div class="row-actions">
       ${lights || sounds ? `<label class="dimmer" title="${sounds ? "How loud this device plays" : "How bright this device may go"}"><span class="sr-only">${sounds ? "Volume" : "Brightness"} for ${h(d.name)}</span>
-        <input type="range" min="0.05" max="1" step="0.05" value="${d.brightness ?? 1}" aria-label="${sounds ? "Volume" : "Brightness"} for ${h(d.name)}" onchange="L.dim('${js(d.id)}', +this.value)">
+        <input type="range" min="0.05" max="1" step="0.05" value="${d.brightness ?? 1}" aria-label="${sounds ? "Volume" : "Brightness"} for ${h(d.name)}" oninput="this.nextElementSibling.textContent = Math.round(+this.value * 100) + '%'" onchange="L.dim('${js(d.id)}', +this.value)">
         <span class="dim small">${Math.round((d.brightness ?? 1) * 100)}%</span></label>` : ""}
       ${lights ? `<label title="Whose agent tabs light up this device"><span class="sr-only">Agent tabs shown on ${h(d.name)}</span>
         <select class="input sm" onchange="L.deviceAgent('${js(d.id)}', this.value)">
@@ -642,11 +642,20 @@ function renderIntegrations(st) {
 // The limits an agent integration read with its own login — the session, the
 // week for all models, then any per-model weeks — as thin meters. Grey until
 // it matters, amber past 70 %, red past 90 %.
-const METER_LABEL = { five_hour: "Session · 5 hours", seven_day: "Week · 7 days", seven_day_opus: "Week · Opus", seven_day_sonnet: "Week · Sonnet" };
+const METER_LABEL = {
+  five_hour: "Session · 5 hours",
+  daily: "Daily · 24 hours",
+  seven_day: "Week · 7 days",
+  gemini_flash: "Gemini Flash",
+  gemini_pro: "Gemini Pro",
+  gemini_flash_lite: "Gemini Flash-Lite",
+  seven_day_opus: "Week · Opus",
+  seven_day_sonnet: "Week · Sonnet",
+};
 function meterLabel(k) { return METER_LABEL[k] || "Week · " + k.replace(/^seven_day_/, "").replace(/_/g, " ").replace(/^\w/, c => c.toUpperCase()); }
 function usageMeters(u) {
-  const rank = { five_hour: 0, seven_day: 1 };
-  const keys = u ? Object.keys(u).filter(k => u[k] && typeof u[k] === "object" && typeof u[k].used === "number").sort((a, b) => (rank[a] ?? 2) - (rank[b] ?? 2) || a.localeCompare(b)) : [];
+  const rank = { five_hour: 0, daily: 1, seven_day: 2, gemini_flash: 3, gemini_pro: 4, gemini_flash_lite: 5 };
+  const keys = u ? Object.keys(u).filter(k => u[k] && typeof u[k] === "object" && typeof u[k].used === "number").sort((a, b) => (rank[a] ?? 10) - (rank[b] ?? 10) || a.localeCompare(b)) : [];
   if (!keys.length) return "";
   const tone = p => p >= 90 ? "var(--red)" : p >= 70 ? "var(--amber)" : "var(--dim)";
   const left = ts => { if (!ts) return ""; const s = Math.max(0, ts - Date.now() / 1000), d = Math.floor(s / 86400), hh = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${hh}h` : hh ? `${hh}h ${String(m).padStart(2, "0")}m` : `${m}m`; };
@@ -727,14 +736,15 @@ function renderSettings(st) {
   </div><div class="settings-extras"><div class="section-head"><h2>More options</h2></div><details class="disclosure" id="settings-screen"><summary><span>Screen status tab<small>Position, size and what it shows</small></span></summary><div class="rows">
     ${row("Status tab on the screen edge", "Show agent progress in a small tab at the edge of your screen.", tog("notch"))}
     ${s.notch ? row("Where it sits", "Bottom keeps it clear of a MacBook's notch and menu bar.", `<select class="input" aria-label="Status tab position" onchange="L.setting('notch_position', this.value)">${[["top", "Top centre"], ["top-left", "Top left"], ["top-right", "Top right"], ["bottom", "Bottom centre"], ["left", "Left edge"], ["right", "Right edge"]].map(([v, name]) => `<option value="${v}" ${s.notch_position === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
-    ${s.notch ? row("Where along the edge", "Drag the tab itself to put it anywhere, or set it here. Reset to use the preset above.", `<div class="inline"><input type="range" min="0" max="100" value="${s.notch_offset < 0 ? 50 : s.notch_offset}" aria-label="Status tab position along the edge" onchange="L.setting('notch_offset', +this.value)"><span class="muted small">${s.notch_offset < 0 ? "preset" : s.notch_offset + "%"}</span>${s.notch_offset >= 0 ? `<button class="btn sm ghost" onclick="L.setting('notch_offset', -1)">Reset</button>` : ""}</div>`) : ""}
+    ${s.notch ? row("Where along the edge", "Drag the tab itself to put it anywhere, or set it here. Reset to use the preset above.", `<div class="inline"><input type="range" min="0" max="100" value="${s.notch_offset < 0 ? 50 : s.notch_offset}" aria-label="Status tab position along the edge" oninput="this.nextElementSibling.textContent = this.value + '%'" onchange="L.setting('notch_offset', +this.value)"><span class="muted small">${s.notch_offset < 0 ? "preset" : s.notch_offset + "%"}</span>${s.notch_offset >= 0 ? `<button class="btn sm ghost" onclick="L.setting('notch_offset', -1)">Reset</button>` : ""}</div>`) : ""}
     ${s.notch ? row("Thickness", "Thin stays out of the way; thick is easier to read from across the room.", `<select class="input" aria-label="Status tab thickness" onchange="L.setting('notch_size', this.value)">${[["thin", "Thin"], ["regular", "Regular"], ["thick", "Thick"]].map(([v, name]) => `<option value="${v}" ${(s.notch_size || "regular") === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
-    ${s.notch ? row("Opacity", "How solid the tab is over whatever is behind it.", `<div class="inline"><input type="range" min="30" max="100" value="${s.notch_opacity ?? 96}" aria-label="Status tab opacity" onchange="L.setting('notch_opacity', +this.value)"><span class="muted small">${s.notch_opacity ?? 96}%</span></div>`) : ""}
+    ${s.notch ? row("Visual theme", "Aesthetic style of the status tab.", `<select class="input" aria-label="Status tab theme" onchange="L.setting('notch_theme', this.value)">${[["liquid", "Liquid Mercury Drop (Organic Fluid)"], ["dynamic", "Dynamic Island (Glass & Aura)"], ["rog", "ROG Cyber Gamer (Neon & Sharp)"], ["minimal", "Minimalist Stealth HUD"], ["studio", "Studio Pro Dock"]].map(([v, name]) => `<option value="${v}" ${(s.notch_theme || "liquid") === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
+    ${s.notch ? row("Opacity", "How solid the tab is over whatever is behind it.", `<div class="inline"><input type="range" min="30" max="100" value="${s.notch_opacity ?? 96}" aria-label="Status tab opacity" oninput="this.nextElementSibling.textContent = this.value + '%'" onchange="L.setting('notch_opacity', +this.value)"><span class="muted small">${s.notch_opacity ?? 96}%</span></div>`) : ""}
     ${s.notch ? row("Hide during full-screen apps", "Games, films and presentations keep the whole screen. Double-click the tab to pin it open.", tog("notch_hide_fullscreen")) : ""}
     ${s.notch ? row("Hide when idle", "Minutes with no tab working or waiting on you before the tab goes away. 0 keeps it up. It comes back the moment an agent does something.", `<div class="inline"><input class="input num" type="number" min="0" max="1440" value="${s.notch_idle_hide_min ?? 0}" aria-label="Minutes idle before the status tab hides" onchange="L.setting('notch_idle_hide_min', +this.value)"><span class="muted small">min</span></div>`) : ""}
     ${s.notch ? row("Hide completed tabs after", "Finished tabs leave the screen status tab after this many minutes. Working and input tabs always stay visible. Set 0 to keep completed tabs.", `<div class="inline"><input class="input num" type="number" min="0" max="1440" value="${s.notch_completed_hide_min ?? 30}" aria-label="Minutes before completed tabs hide from the status tab" onchange="L.setting('notch_completed_hide_min', +this.value)"><span class="muted small">min</span></div>`) : ""}
-    ${s.notch ? row("Whose tabs", "Show every agent's sessions, or just one agent's.", `<select class="input" aria-label="Which agents the status tab shows" onchange="L.setting('notch_agents', this.value)">${[["all", "Claude and Codex"], ["claude", "Claude only"], ["codex", "Codex only"]].map(([v, name]) => `<option value="${v}" ${s.notch_agents === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
-    ${s.notch ? row("What it shows", "Untick anything you don't want. Just the Claude limits and the live tabs is a popular pick.", `<div class="checks">${[["notch_show_sessions", "Live tabs"], ["notch_show_activity", "What each tab is doing"], ["notch_show_context", "Context window"], ["notch_show_cost", "Session cost"], ["notch_show_claude_usage", "Claude usage limits"], ["notch_show_codex_usage", "Codex usage limits"], ["notch_show_accent", "Agent colour on each bar"], ["notch_show_usage_follows_tabs", "Limits only while that agent has a tab open"]].map(([k, name]) => `<label class="check"><input type="checkbox" ${s[k] !== false ? "checked" : ""} onchange="L.setting('${k}', this.checked)"> ${name}</label>`).join("")}</div>`) : ""}
+    ${s.notch ? row("Whose tabs", "Show every agent's sessions, or just one agent's.", `<select class="input" aria-label="Which agents the status tab shows" onchange="L.setting('notch_agents', this.value)">${[["all", "All agents"], ["claude", "Claude only"], ["codex", "Codex only"], ["gemini", "Gemini / Antigravity only"]].map(([v, name]) => `<option value="${v}" ${s.notch_agents === v ? "selected" : ""}>${name}</option>`).join("")}</select>`) : ""}
+    ${s.notch ? row("What it shows", "Untick anything you don't want. Just the Claude limits and the live tabs is a popular pick.", `<div class="checks">${[["notch_show_sessions", "Live tabs"], ["notch_show_activity", "What each tab is doing"], ["notch_show_context", "Context window"], ["notch_show_cost", "Session cost"], ["notch_show_claude_usage", "Claude usage limits"], ["notch_show_codex_usage", "Codex usage limits"], ["notch_show_gemini_usage", "Gemini / Google usage limits"], ["notch_show_accent", "Agent colour on each bar"], ["notch_show_usage_follows_tabs", "Limits only while that agent has a tab open"]].map(([k, name]) => `<label class="check"><input type="checkbox" ${s[k] !== false ? "checked" : ""} onchange="L.setting('${k}', this.checked)"> ${name}</label>`).join("")}</div>`) : ""}
   </div></details>
   <details class="disclosure" id="settings-devices"><summary><span>Devices &amp; lighting<small>Device discovery and playback</small></span></summary><div class="rows">
     ${row("Start OpenRGB automatically", "Launches the OpenRGB server when it is installed but not running.", tog("launch_openrgb"))}
