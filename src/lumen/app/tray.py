@@ -152,7 +152,7 @@ def run_tray(engine: Engine, port: int, stop: threading.Event, icon_ref: list | 
 
     def toggle_notch(item):
         new_val = not item.checked
-        engine.config.set({"notch": new_val})
+        engine.config.update_settings({"notch": new_val})
         engine.apply_settings()
 
     icon.menu = pystray.Menu(
