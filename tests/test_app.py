@@ -79,7 +79,6 @@ def test_windows_source_launch_detaches_only_the_tray(argv, background, monkeypa
 
 def test_background_launch_hides_console_and_preserves_open(monkeypatch):
     monkeypatch.setattr(autostart, "command", lambda: ["pythonw.exe", "-m", "lumen"])
-    monkeypatch.setattr(autostart.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     with mock.patch.object(autostart.subprocess, "Popen") as launch:
         autostart.launch_background(open_ui=True)
     assert launch.call_args.args[0] == ["pythonw.exe", "-m", "lumen", "run", "--background", "--open"]

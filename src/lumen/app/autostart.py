@@ -34,7 +34,7 @@ def launch_background(open_ui: bool = False) -> None:
     """Release the Windows terminal; the child owns the tray and instance lock."""
     subprocess.Popen(command() + ["run", "--background"] + (["--open"] if open_ui else []),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     creationflags=subprocess.CREATE_NO_WINDOW, close_fds=True)
+                     creationflags=0x08000000, close_fds=True)  # CREATE_NO_WINDOW
 
 
 def set_enabled(value: bool) -> None:
