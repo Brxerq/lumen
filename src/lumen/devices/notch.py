@@ -519,7 +519,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                fill=MUTED + (255,), anchor="rm")
 
     if unfolded:
-        name_f, meta_f = _font(12 * SS, bold=True), _font(12 * SS)
+        meta_f = _font(12 * SS)
         badge_f = _font(10 * SS, bold=True)
         d.line((BAR_INSET * SS, height * SS + 2 * SS, W - BAR_INSET * SS, height * SS + 2 * SS), fill=EDGE, width=SS)
         y = (height + PANEL_PAD) * SS

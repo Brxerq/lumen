@@ -1,9 +1,7 @@
 """Google / Gemini and Antigravity usage limits and session tracking tests."""
 
-import json
-from pathlib import Path
-from lumen.integrations import google_usage as gu
 from lumen.integrations import gemini
+from lumen.integrations import google_usage as gu
 
 
 def test_google_usage_summarize_various_payloads():

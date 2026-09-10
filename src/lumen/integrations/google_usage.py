@@ -14,9 +14,7 @@ import os
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lumen.integrations.claude_usage import STALE_S, _when
@@ -239,7 +237,7 @@ def refresh(now: float | None = None) -> dict | None:
 
 
 def _next_midnight_utc() -> float:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return tomorrow.timestamp()
 

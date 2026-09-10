@@ -4,17 +4,15 @@ and quota limits.
 
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
-import sys
 import threading
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 
 from lumen.core.events import Event
 from lumen.integrations import google_usage
-from lumen.integrations.agent_sessions import AgentIntegration, RUNNING, INPUT, DONE
+from lumen.integrations.agent_sessions import DONE, INPUT, RUNNING, AgentIntegration
 
 GEMINI_HOME = Path.home() / ".gemini"
 
