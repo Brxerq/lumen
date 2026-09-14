@@ -36,6 +36,7 @@ jobs:
   build:
     needs: draft
     strategy:
+      fail-fast: false  # one broken platform must not hide whether the others build
       matrix:
         include:
           - os: windows-latest
@@ -96,16 +97,29 @@ jobs:
       - name: Smoke-test the frozen binary
         shell: bash
         run: |
-          chmod +x "${{ matrix.built }}" 2>/dev/null || true
-          "${{ matrix.built }}" selfcheck
-          "${{ matrix.built }}" scan
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get install -y xvfb >/dev/null
-            xvfb-run -a python tests/smoke_notch_child.py "${{ matrix.built }}"
-          else
-            python tests/smoke_notch_child.py "${{ matrix.built }}"
+          chmod +x "$BUILT" 2>/dev/null || true
+          # A failure's output also becomes an annotation, which the checks API
+          # shows without the log-download permission.
+          check() {
+            local out code=0
+            out=$("$@" 2>&1) || code=$?
+            printf '%s\n' "$out"
+            if [ "$code" -ne 0 ]; then
+              msg=$(printf '%s' "$out" | tail -n 30)
+              msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
+              echo "::error title=$RUNNER_OS smoke failed (exit $code): $*::$msg"
+            fi
+            return "$code"
+          }
+          check "$BUILT" selfcheck
+          check "$BUILT" scan
+          # The live status tab is a Windows/macOS surface (transparent, topmost
+          # window); there is no Linux window path to exercise.
+          if [ "$RUNNER_OS" != "Linux" ]; then
+            check python tests/smoke_notch_child.py "$BUILT"
           fi
         env:
+          BUILT: ${{ matrix.built }}
           LUMEN_HOME: ${{ runner.temp }}/lumen-home
       - name: Name the binary after the platform, record its checksum, upload to the draft
         shell: bash

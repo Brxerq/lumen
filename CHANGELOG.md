@@ -18,7 +18,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Self-update waits for the new version to answer on `/api/state` rather than any listener on the port, keeps the previous binary as `.old`, never kills a healthy start on systems without `curl`, and does not offer a release until its binary and `SHA256SUMS` are published. Linux updates are offered only on x86-64.
 
 ### Changed
-- Releases run the full CI on the tagged commit, build into a draft, smoke-test the signed binaries (including a live `notch-child` window), verify every asset against `SHA256SUMS`, then publish once.
+- Releases run the full CI on the tagged commit, build into a draft, smoke-test the signed binaries (including a live `notch-child` window on Windows and macOS), verify every asset against `SHA256SUMS`, then publish once.
 
 ## [0.8.1] — 2026-09-11
 
