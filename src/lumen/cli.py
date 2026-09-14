@@ -8,7 +8,7 @@
     lumen emit <type> [--data k=v ...]
     lumen exec -- <command>    run a command, report when it finishes
     lumen timer 25m [--name x]
-    lumen connect claude|codex     install agent hooks      (disconnect to remove)
+    lumen connect claude|codex|gemini   install agent hooks (disconnect to remove)
     lumen autostart on|off
     lumen open                 open the dashboard
 
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     timer.add_argument("--name", default="")
     for verb in ("connect", "disconnect"):
         p = sub.add_parser(verb, help=f"{verb} an integration's hooks")
-        p.add_argument("integration", choices=["claude", "codex"])
+        p.add_argument("integration", choices=["claude", "codex", "gemini"])
     auto = sub.add_parser("autostart", help="start Lumen at login")
     auto.add_argument("state", choices=["on", "off"])
     sub.add_parser("open", help="open the dashboard")
@@ -179,8 +179,8 @@ def _test(device_id: str, effect: str, color: str) -> int:
 
 
 def _hooks(agent: str, install: bool) -> int:
-    from lumen.integrations import claude_code, codex
-    cls = claude_code.ClaudeCode if agent == "claude" else codex.Codex
+    from lumen.integrations import claude_code, codex, gemini
+    cls = {"claude": claude_code.ClaudeCode, "codex": codex.Codex, "gemini": gemini.GeminiIntegration}[agent]
     integ = cls(lambda e: None, {})
     print(integ.connect() if install else integ.disconnect())
     return 0

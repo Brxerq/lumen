@@ -33,9 +33,40 @@ def test_release_asset_matches_mac_architecture():
     for machine, expected in [("arm64", "lumen-macos"), ("x86_64", "lumen-macos-x86_64"), ("unknown", "")]:
         with mock.patch.object(update.sys, "platform", "darwin"), mock.patch("platform.machine", return_value=machine):
             assert update._platform_asset() == expected
-    for system, expected in [("win32", "lumen.exe"), ("linux", "lumen-linux")]:
-        with mock.patch.object(update.sys, "platform", system):
+    for system, machine, expected in [("win32", "AMD64", "lumen.exe"), ("linux", "x86_64", "lumen-linux"),
+                                      ("linux", "aarch64", "")]:
+        with mock.patch.object(update.sys, "platform", system), mock.patch("platform.machine", return_value=machine):
             assert update._platform_asset() == expected
+
+
+def test_unix_swapper_probes_the_version_and_never_kills_without_curl(tmp_path, monkeypatch):
+    exe, new = tmp_path / "lumen", tmp_path / "lumen.new"
+    monkeypatch.setattr(update.sys, "platform", "linux")
+    monkeypatch.setattr(update.tempfile, "gettempdir", lambda: str(tmp_path))
+    with mock.patch.object(update.subprocess, "Popen") as popen:
+        update._spawn_swapper(exe, new, 6733, "v0.8.2")
+    body = Path(popen.call_args.args[0][1]).read_text(encoding="utf-8")
+    assert "lsof" not in body and '"version": "0.8.2"' in body
+    with_curl, without_curl = body.split("\nelse\n")
+    assert "command -v curl" in with_curl and "pkill" in with_curl and "pkill" not in without_curl
+    assert f"cp -f {shlex.quote(str(exe))} {shlex.quote(str(exe) + '.old')}" in body
+
+
+def test_release_is_not_offered_until_its_checksums_are_published(monkeypatch):
+    import io
+    import json
+    from contextlib import contextmanager
+    rel = {"tag_name": "v99.0.0", "assets": [{"name": update.ASSET, "browser_download_url": "x"}]}
+
+    @contextmanager
+    def urlopen(*a, **kw):
+        yield io.BytesIO(json.dumps(rel).encode())
+    monkeypatch.setattr(update.sys, "frozen", True, raising=False)
+    with mock.patch.object(update.urllib.request, "urlopen", urlopen):
+        info = update.check()
+        assert info["newer"] and not info["available"]
+        rel["assets"].append({"name": update.SUMS, "browser_download_url": "y"})
+        assert update.check()["available"]
 
 
 def test_version_tuple_ordering():

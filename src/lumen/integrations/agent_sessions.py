@@ -62,7 +62,12 @@ HOOK_EVENTS = {
     "Notification": INPUT,        # matcher: permission_prompt|elicitation_dialog
     "Stop": DONE,
     "SessionEnd": None,
+    # Gemini CLI names its turn hooks differently.
+    "BeforeAgent": RUNNING,
+    "AfterTool": RUNNING,
+    "AfterAgent": DONE,
 }
+GEMINI_EVENTS = {"BeforeAgent", "AfterTool", "AfterAgent"}
 # Which hook events each agent needs, and the matcher (None = every call).
 CLAUDE_HOOKS = {"SessionStart": None, "UserPromptSubmit": None, "PostToolUse": None, "PermissionRequest": None,
                 "Stop": None, "SessionEnd": None, "PreToolUse": "AskUserQuestion",
@@ -94,9 +99,13 @@ def _safe_session_id(value) -> str | None:
 # ---------------------------------------------------------------------------
 
 def agent_of(payload: dict) -> str:
-    # Codex payloads carry turn_id and a ~/.codex transcript; Claude Code's don't.
-    if "turn_id" in payload or ".codex" in str(payload.get("transcript_path") or ""):
+    # Codex payloads carry turn_id and a ~/.codex transcript; Gemini CLI's a
+    # ~/.gemini transcript or its own event names; Claude Code's neither.
+    transcript = str(payload.get("transcript_path") or "")
+    if "turn_id" in payload or ".codex" in transcript:
         return "codex"
+    if ".gemini" in transcript or payload.get("hook_event_name") in GEMINI_EVENTS:
+        return "gemini"
     return "claude"
 
 
@@ -123,7 +132,7 @@ def apply_hook(payload: dict, state_dir: Path | None = None, now: float | None =
         previous = {}
     record = {"status": status, "ts": now, "agent": agent_of(payload),
               "started": previous.get("started") or now}
-    for key in ("tokens", "model", "transcript_offset"):
+    for key in ("tokens", "model", "transcript_offset", "transcript_head"):
         if key in previous:
             record[key] = previous[key]
     record["activity"] = activity_of(payload, previous.get("activity", ""))
@@ -211,7 +220,9 @@ def _accumulate_tokens(transcript: Path, record: dict) -> None:
         with transcript.open("rb") as f:
             f.seek(0, 2)
             size = f.tell()
-            if size < offset:  # truncated or a different session reusing the path
+            # Truncated, or a different file now at this path (same size or larger
+            # included): the bytes already counted are no longer the same bytes.
+            if size < offset or (offset and record.get("transcript_head") != _head(f, offset)):
                 offset, totals = 0, {}
             f.seek(offset)
             while f.tell() < size:
@@ -233,10 +244,19 @@ def _accumulate_tokens(transcript: Path, record: dict) -> None:
                     totals[key] = int(totals.get(key, 0)) + value
                 if message.get("model"):
                     record["model"] = str(message["model"])
+            head = _head(f, offset)
     except OSError:
         return
     record["tokens"] = totals
     record["transcript_offset"] = offset
+    record["transcript_head"] = head
+
+
+def _head(f, offset: int) -> str:
+    """Fingerprint of the first bytes already counted (at most 256)."""
+    import hashlib
+    f.seek(0)
+    return hashlib.sha1(f.read(min(256, offset))).hexdigest()
 
 
 def context_usage(transcript: Path, record: dict | None = None) -> dict | None:
@@ -307,15 +327,16 @@ def hook_command() -> str:
 
 
 def install_hooks(settings_path: Path, hooks: dict[str, str | None], command: str | None = None,
-                  async_: bool = True) -> str:
+                  async_: bool = True, timeout: int = 5) -> str:
     """Merge our hook command into a Claude-style hooks file (idempotent).
-    Other people's hooks are kept; older Lumen entries are replaced."""
+    Other people's hooks are kept; older Lumen entries are replaced.
+    `timeout` is in the agent's own unit: seconds for Claude/Codex, ms for Gemini."""
     command = command or hook_command()
     data = _read_json(settings_path, strict=True)
     data.setdefault("hooks", {})
     _strip_ours(data["hooks"])
     for event, matcher in hooks.items():
-        entry = {"type": "command", "command": command, "timeout": 5}
+        entry = {"type": "command", "command": command, "timeout": timeout}
         if async_:
             entry["async"] = True
         group: dict[str, Any] = {"hooks": [entry]}
@@ -461,7 +482,10 @@ def session_statuses(hooked: dict[str, str], truth: dict[str, bool], records: di
             # record. Do not let an older terminal boundary finish that new turn.
             newer_hook = (hook_status in (RUNNING, INPUT) and truth_ts > 0 and hook_ts > truth_ts
                           and not truth_records.get(sid, {}).get("archived"))
-            out[sid] = (INPUT if hook_status == INPUT else RUNNING) if truth[sid] or newer_hook else DONE
+            if truth[sid] or newer_hook:
+                out[sid] = INPUT if hook_status == INPUT else RUNNING
+            else:  # a closed turn the agent's own record says is waiting on you (Antigravity) is not done
+                out[sid] = INPUT if truth_records.get(sid, {}).get("status") == INPUT else DONE
         else:
             out[sid] = hooked[sid]
     return out
@@ -632,6 +656,7 @@ class AgentIntegration(Integration):
     hooks_file: Path = Path()
     hooks: dict[str, str | None] = {}
     hooks_async = True
+    hook_timeout = 5  # seconds, in Claude Code's and Codex's settings
     poll_interval_s = 0.5
     can_connect = True
 
@@ -775,7 +800,7 @@ class AgentIntegration(Integration):
 
     def connect(self) -> str:
         try:
-            cmd = install_hooks(self.hooks_file, self.hooks, async_=self.hooks_async)
+            cmd = install_hooks(self.hooks_file, self.hooks, async_=self.hooks_async, timeout=self.hook_timeout)
         except ValueError as e:
             return str(e)
         return f"Hooks installed in {self.hooks_file} (command: {cmd}). Sessions started from now on report their status."

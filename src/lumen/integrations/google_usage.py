@@ -160,16 +160,21 @@ def credentials() -> dict | None:
     return None
 
 
+def usage_path() -> Path:
+    return Path.home() / ".gemini" / "antigravity" / "usage.json"
+
+
 def read_local_antigravity_usage() -> dict | None:
-    antigravity_dir = Path.home() / ".gemini" / "antigravity"
-    usage_file = antigravity_dir / "usage.json"
-    if usage_file.exists():
-        try:
-            data = json.loads(usage_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-        except (OSError, ValueError):
-            return None
+    """The file's contents, with `_observed_at` = its mtime: rereading an old
+    file must not make its numbers fresh again."""
+    usage_file = usage_path()
+    try:
+        data = json.loads(usage_file.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data["_observed_at"] = usage_file.stat().st_mtime
+            return data
+    except (OSError, ValueError):
+        return None
     return None
 
 
@@ -218,12 +223,16 @@ def refresh(now: float | None = None) -> dict | None:
     if data:
         summary = summarize(data, now_ts)
         if summary:
+            observed = data.get("_observed_at")
+            observed = min(now_ts, float(observed)) if isinstance(observed, (int, float)) else now_ts
             with _lock:
                 global _latest, _latest_at
-                _latest, _latest_at, _detail = summary, now_ts, "usage read from Google / Antigravity"
-                if "five_hour" in summary:
-                    _record_sample(now_ts, summary["five_hour"]["used"])
-            return summary
+                if observed > _latest_at or summary != _latest:
+                    _latest, _latest_at = summary, observed
+                    if "five_hour" in summary:
+                        _record_sample(observed, summary["five_hour"]["used"])
+                _detail = "usage read from Google / Antigravity"
+            return latest(now_ts)
 
     with _lock:
         _detail = "Google / Antigravity quota data unavailable"

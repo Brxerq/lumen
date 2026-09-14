@@ -438,7 +438,8 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
 
     by_agent = clean_usage(usage or {})
     meters = usage_layout(by_agent, len(rows), expanded_usage, height) if unfolded else []
-    five = next((s[k]["used"] for s in by_agent.values() for k in ("five_hour", "daily", "seven_day") if k in s), None)
+    # the most constrained limit of any provider: a healthy first provider must not hide an exhausted one
+    five = max((b["used"] for s in by_agent.values() for b in s.values()), default=None)
 
     BTN_H = 22
     w = PANEL_WIDTH if unfolded else width
@@ -822,12 +823,20 @@ def self_check() -> bool:
     rows = [("claude", "check", "running", 42, "Editing api.py", 0.5),
             ("codex", "check", "input", None, "", None),
             ("gemini", "check", "done", 10, "Planning", None)]
-    usage = {"five_hour": {"used": 23, "resets_at": None}, "seven_day": {"used": 72, "resets_at": None},
-             "gemini": {"daily": {"used": 15}}}
+    rows.append(("claude", "a task title far too long for any row " * 3, "running", 99, "Running: " + "x" * 80, 12.5))
+    # every provider shape the daemon sends, including one with no usable data ("unavailable")
+    usage = {"claude": {"five_hour": {"used": 23, "resets_at": None}, "seven_day": {"used": 72, "resets_at": None}},
+             "codex": {"seven_day": {"used": 40.5, "resets_at": None}}, "gemini": {"daily": {"used": 15}}}
     zones = [(240, 170, 40)] * 2 + [(230, 60, 60)] * 2 + [(0, 240, 48)] * 2
-    a = render(zones, rows, DEFAULT_PALETTE, KEY, [42, None, 10], usage)
-    b = render(zones, rows, DEFAULT_PALETTE, None, [42, None, 10], usage, unfolded=True, flip=True, glow_gain=1.5)
-    return a.size == (WIDTH, HEIGHT) and b.size[0] == PANEL_WIDTH and b.size[1] > HEIGHT
+    fills = [42, None, 10, 99]
+    a = render(zones, rows, DEFAULT_PALETTE, KEY, fills, usage)
+    b = render(zones, rows, DEFAULT_PALETTE, None, fills, usage, unfolded=True, flip=True, glow_gain=1.5)
+    ok = a.size == (WIDTH, HEIGHT) and b.size[0] == PANEL_WIDTH and b.size[1] > HEIGHT
+    for theme in ("liquid", "dynamic", "rog", "minimal", "studio"):
+        c = render(zones, rows, DEFAULT_PALETTE, KEY, fills, usage, unfolded=True, theme=theme,
+                   expanded_usage={"claude", "codex"})
+        ok = ok and c.size[0] == PANEL_WIDTH and c.size[1] > b.size[1]
+    return ok
 
 
 def _top_inset() -> int:
@@ -1110,8 +1119,13 @@ def run_child() -> int:
         if now - state["fs_checked"] > 1.0:  # once a second: is a game or a film in front?
             state["fs_checked"] = now
             fs = bool(state["options"].get("hide_fullscreen", True)) and fullscreen_app_in_front()
-            if fs != state["fullscreen"]:
-                state["fullscreen"] = fs
+            # Time alone changes what shows (done rows expire, idle hides, reset
+            # countdowns tick) while the payload stays identical: redraw on that too.
+            idle = state["options"].get("idle_hide_min")
+            clock = ([s.get("id") for s in visible_sessions(state["sessions"], state["options"])],
+                     idle_hidden(state["sessions"], int(idle) if isinstance(idle, (int, float)) else 0), int(now // 60))
+            if fs != state["fullscreen"] or clock != state.get("clock"):
+                state["fullscreen"], state["clock"] = fs, clock
                 draw()
         root.after(16 if state["pulse_until"] > now else 33, poll)
 

@@ -88,31 +88,33 @@ class AuraController:
 
     def flush(self) -> None:
         with self._lock:
-            if self._dev is None:
-                try:
-                    self._dev = self._open()
-                except Exception:
-                    return
+            frame = frame_report(self.keyboard, self.lightbar)
             try:
-                self._dev.send_feature_report(frame_report(self.keyboard, self.lightbar))
+                if self._dev is None:
+                    self._dev = self._open()
+                self._dev.send_feature_report(frame)
             except (OSError, ValueError):
-                self.close()
+                self._close_locked()
                 # On wake-from-sleep or interface reset, retry once cleanly
                 try:
                     self._dev = self._open()
-                    self._dev.send_feature_report(frame_report(self.keyboard, self.lightbar))
+                    self._dev.send_feature_report(frame)
                 except Exception:
-                    self.close()
+                    self._close_locked()
                     raise
 
     def close(self) -> None:
         with self._lock:
-            if self._dev is not None:
-                try:
-                    self._dev.close()
-                except OSError:
-                    pass
-                self._dev = None
+            self._close_locked()
+
+    def _close_locked(self) -> None:
+        """Drop the handle. Caller holds self._lock (it is not reentrant)."""
+        if self._dev is not None:
+            try:
+                self._dev.close()
+            except OSError:
+                pass
+            self._dev = None
 
 
 class AuraSurface(Device):

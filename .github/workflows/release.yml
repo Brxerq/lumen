@@ -3,6 +3,11 @@ name: release
 # Tag a version (git tag v0.3.0 && git push --tags) and this attaches the
 # frozen binaries to a GitHub release. The dashboard's "Check for updates"
 # button reads that release.
+#
+# Order: CI on the tagged commit -> a draft release -> build, sign, smoke-test
+# and upload every platform -> verify all assets against SHA256SUMS -> publish.
+# Nothing is public (and nothing is offered to the updater) until every asset
+# and the checksum file are there.
 on:
   push:
     tags: ["v*"]
@@ -10,8 +15,26 @@ on:
 permissions:
   contents: write
 
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  TAG: ${{ github.ref_name }}
+
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  draft:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the draft release
+        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --generate-notes --title "$TAG"
+
   build:
+    needs: draft
     strategy:
       matrix:
         include:
@@ -35,17 +58,6 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: pyinstaller build/lumen.spec --distpath dist --workpath build/pyi -y
-      # Run the binary we are about to ship. A hidden import PyInstaller missed
-      # (pyobjc on a Mac, say) fails here instead of silently on a user's machine.
-      # The Windows build is windowed, so only its exit code speaks.
-      - name: Smoke-test the frozen binary
-        shell: bash
-        run: |
-          chmod +x "${{ matrix.built }}" 2>/dev/null || true
-          "${{ matrix.built }}" selfcheck
-          "${{ matrix.built }}" scan
-        env:
-          LUMEN_HOME: ${{ runner.temp }}/lumen-home
       - name: Sign the binary (only when signing secrets are configured)
         shell: bash
         env:
@@ -77,37 +89,51 @@ jobs:
           else
             echo "no signing secrets for $RUNNER_OS; shipping unsigned"
           fi
-      - name: Name the binary after the platform and record its checksum
+      # Run the binary we are about to ship, after signing, so the bytes tested
+      # are the bytes uploaded. A hidden import PyInstaller missed fails here
+      # instead of on a user's machine. The Windows build is windowed, so only
+      # its exit code speaks.
+      - name: Smoke-test the frozen binary
+        shell: bash
+        run: |
+          chmod +x "${{ matrix.built }}" 2>/dev/null || true
+          "${{ matrix.built }}" selfcheck
+          "${{ matrix.built }}" scan
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y xvfb >/dev/null
+            xvfb-run -a python tests/smoke_notch_child.py "${{ matrix.built }}"
+          else
+            python tests/smoke_notch_child.py "${{ matrix.built }}"
+          fi
+        env:
+          LUMEN_HOME: ${{ runner.temp }}/lumen-home
+      - name: Name the binary after the platform, record its checksum, upload to the draft
         shell: bash
         run: |
           mv "${{ matrix.built }}" "${{ matrix.asset }}"
-          # The in-app updater refuses to install anything whose SHA-256 is not
-          # listed here, so every job writes its own line. The runners disagree
-          # about which checksum tool exists: Linux and Git Bash on Windows have
-          # sha256sum, macOS has shasum.
+          # The runners disagree about which checksum tool exists: Linux and
+          # Git Bash on Windows have sha256sum, macOS has shasum.
           if command -v sha256sum >/dev/null; then
             sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           else
             shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           fi
           cat "${{ matrix.asset }}.sha256"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
-        with:
-          files: |
-            ${{ matrix.asset }}
-            ${{ matrix.asset }}.sha256
-          generate_release_notes: true
+          gh release upload "$TAG" "${{ matrix.asset }}" "${{ matrix.asset }}.sha256" --clobber
 
-  checksums:
+  publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: robinraju/release-downloader@28fc21f50d76778e7023361aa1f863e717d3d56f  # v1.13
-        with:
-          tag: ${{ github.ref_name }}
-          fileName: "*.sha256"
-          out-file-path: sums
-      - run: cat sums/*.sha256 > SHA256SUMS && cat SHA256SUMS
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
-        with:
-          files: SHA256SUMS
+      - name: Verify every asset against its checksum, then publish once
+        run: |
+          mkdir release && cd release
+          gh release download "$TAG"
+          for asset in lumen.exe lumen-macos lumen-macos-x86_64 lumen-linux; do
+            test -s "$asset" && test -s "$asset.sha256" || { echo "missing $asset"; exit 1; }
+          done
+          # The in-app updater refuses anything whose SHA-256 is not listed here.
+          cat *.sha256 | sed 's/ \*/  /' > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber
+          gh release edit "$TAG" --draft=false --latest

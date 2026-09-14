@@ -79,10 +79,24 @@ def test_windows_source_launch_detaches_only_the_tray(argv, background, monkeypa
 
 def test_background_launch_hides_console_and_preserves_open(monkeypatch):
     monkeypatch.setattr(autostart, "command", lambda: ["pythonw.exe", "-m", "lumen"])
+    monkeypatch.setattr(autostart, "answering", lambda port: True)
     with mock.patch.object(autostart.subprocess, "Popen") as launch:
         autostart.launch_background(open_ui=True)
     assert launch.call_args.args[0] == ["pythonw.exe", "-m", "lumen", "run", "--background", "--open"]
     assert launch.call_args.kwargs["creationflags"] == 0x08000000
+    assert launch.call_args.kwargs["stderr"] is not autostart.subprocess.DEVNULL  # early failures reach the log
+
+
+def test_background_launch_reports_a_child_that_dies(monkeypatch):
+    monkeypatch.setattr(autostart, "command", lambda: ["pythonw.exe", "-m", "lumen"])
+    monkeypatch.setattr(autostart, "answering", lambda port: False)
+    with mock.patch.object(autostart.subprocess, "Popen") as launch:
+        launch.return_value.poll.return_value = 1
+        with pytest.raises(OSError, match="exited with code 1"):
+            autostart.launch_background()
+        launch.return_value.poll.return_value = None
+        with pytest.raises(OSError, match="no Lumen dashboard"):
+            autostart.launch_background(wait_s=0.3)
 
 
 def test_background_launch_reports_spawn_failure(monkeypatch):

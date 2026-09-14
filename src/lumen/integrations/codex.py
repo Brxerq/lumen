@@ -52,6 +52,9 @@ def _display_title(value: object) -> str:
     return " ".join(str(value or "").split())[:80]
 
 
+_heads: dict[Path, bytes] = {}  # rollout -> its first bytes already scanned (at most 256)
+
+
 def turn_open(rollout: Path, session_id: str | None = None) -> bool:
     """Newest turn-boundary event wins. Rollouts grow to many MB inside one
     turn, so scan the whole file once and only the appended bytes afterwards."""
@@ -59,8 +62,10 @@ def turn_open(rollout: Path, session_id: str | None = None) -> bool:
     with rollout.open("rb") as f:
         f.seek(0, 2)
         size = f.tell()
-        if size < offset:
-            offset, state, has_metadata, belongs = 0, False, False, True  # truncated/rotated
+        known = _heads.get(rollout, b"")[:offset]
+        f.seek(0)
+        if size < offset or f.read(len(known)) != known:
+            offset, state, has_metadata, belongs = 0, False, False, True  # truncated, or another file at this path
         f.seek(offset)
         if not has_metadata:
             belongs = True
@@ -86,6 +91,8 @@ def turn_open(rollout: Path, session_id: str | None = None) -> bool:
             boundary = payload.get("type")
             if boundary in TURN_OPEN_EVENTS:
                 state = TURN_OPEN_EVENTS[boundary]
+        f.seek(0)
+        _heads[rollout] = f.read(min(256, offset))
     _scan[rollout] = (offset, state, has_metadata, belongs)
     return state
 

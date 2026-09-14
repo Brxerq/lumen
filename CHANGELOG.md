@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-09-14
+
+### Fixed
+- ASUS Aura write-error recovery no longer deadlocks on its own lock; a failed first open is reported instead of silently ignored.
+- Gemini CLI hooks record sessions as Gemini (not Claude), use Gemini's own event names, and install with millisecond timeouts. `lumen connect gemini` is available.
+- Antigravity sessions waiting for input show as needing input instead of done.
+- An unchanged Antigravity `usage.json` goes stale on schedule; rereading it no longer renews old numbers.
+- The notch hides expired done rows, idles out, and ticks reset countdowns without waiting for an unrelated update.
+- The collapsed notch shows the most constrained quota of any provider, not the first one found.
+- Claude transcripts and Codex rollouts replaced at the same path (same size or larger) are recounted instead of continuing from a stale offset.
+- Windows source installs report a background start only once the dashboard answers; a daemon that exits or never answers is an error, and early startup output reaches the log.
+- Self-update waits for the new version to answer on `/api/state` rather than any listener on the port, keeps the previous binary as `.old`, never kills a healthy start on systems without `curl`, and does not offer a release until its binary and `SHA256SUMS` are published. Linux updates are offered only on x86-64.
+
+### Changed
+- Releases run the full CI on the tagged commit, build into a draft, smoke-test the signed binaries (including a live `notch-child` window), verify every asset against `SHA256SUMS`, then publish once.
+
 ## [0.8.1] — 2026-09-11
 
 ### Fixed

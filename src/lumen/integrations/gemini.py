@@ -16,14 +16,13 @@ from lumen.integrations.agent_sessions import DONE, INPUT, RUNNING, AgentIntegra
 
 GEMINI_HOME = Path.home() / ".gemini"
 
-GEMINI_HOOKS = {
+GEMINI_HOOKS: dict[str, str | None] = {
     "SessionStart": None,
-    "UserPromptSubmit": None,
-    "PostToolUse": None,
-    "PermissionRequest": None,
-    "Stop": None,
+    "BeforeAgent": None,
+    "AfterTool": None,
+    "AfterAgent": None,
+    "Notification": None,
     "SessionEnd": None,
-    "PreToolUse": "request_user_input|AskUserQuestion",
 }
 
 
@@ -86,6 +85,8 @@ class GeminiIntegration(AgentIntegration):
     )
     hooks_file = GEMINI_HOME / "settings.json"
     hooks = GEMINI_HOOKS
+    hooks_async = False  # Gemini CLI has no async flag
+    hook_timeout = 5000  # Gemini CLI reads hook timeouts in milliseconds
     docs = "Reads local Antigravity conversation states and Google/Gemini subscription & quota limits."
 
     def __init__(self, emit: Callable[[Event], None] | None = None, options: dict | None = None):

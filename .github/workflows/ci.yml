@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:  # release.yml runs this on the tagged commit before building anything
 
 # Tests and linters read the checkout and nothing else. Without this the
 # workflow token inherits whatever the repository's default happens to be.

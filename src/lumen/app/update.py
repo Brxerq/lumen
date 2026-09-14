@@ -30,7 +30,9 @@ API = f"https://api.github.com/repos/{REPO}/releases/latest"
 def _platform_asset() -> str:
     if sys.platform == "darwin":
         return {"arm64": "lumen-macos", "x86_64": "lumen-macos-x86_64"}.get(platform.machine(), "")
-    return {"win32": "lumen.exe", "linux": "lumen-linux"}.get(sys.platform, "")
+    if sys.platform == "linux":  # only an x86-64 build is published
+        return "lumen-linux" if platform.machine().lower() in ("x86_64", "amd64") else ""
+    return {"win32": "lumen.exe"}.get(sys.platform, "")
 
 
 ASSET = _platform_asset()
@@ -55,21 +57,25 @@ def check(timeout: float = 8) -> dict:
     by_name = {a.get("name"): a for a in rel.get("assets", [])}
     asset = by_name.get(ASSET)
     sums = by_name.get(SUMS)
+    frozen = bool(getattr(sys, "frozen", False))
+    newer = bool(latest) and _vtuple(latest) > _vtuple(__version__)
     return {
         "current": __version__,
         "latest": latest,
         "url": rel.get("html_url", f"https://github.com/{REPO}/releases"),
         "asset": asset["browser_download_url"] if asset else None,
         "sums": sums["browser_download_url"] if sums else None,
-        "frozen": bool(getattr(sys, "frozen", False)),
-        "available": bool(latest) and _vtuple(latest) > _vtuple(__version__),
+        "frozen": frozen,
+        "newer": newer,
+        # A binary can only offer what it can install: its asset and the checksums.
+        "available": newer and (not frozen or bool(asset and sums)),
     }
 
 
 def apply(on_ready, port: int = 6733) -> str:
     """Download, stage the swap script, then call on_ready() (the caller exits)."""
     info = check()
-    if not info["available"]:
+    if not info.get("newer", info["available"]):
         return "Already up to date."
     if not info["frozen"]:
         # Not `pip install -U lumen`: the name on PyPI belongs to an unrelated
@@ -99,7 +105,7 @@ def apply(on_ready, port: int = 6733) -> str:
     if digest.hexdigest() != expected:
         new.unlink(missing_ok=True)
         return "The download does not match the checksum published with the release; aborted."
-    _spawn_swapper(exe, new, port)
+    _spawn_swapper(exe, new, port, info["latest"])
     on_ready()
     return f"Updating to {info['latest']} — Lumen restarts in a moment."
 
@@ -121,10 +127,14 @@ def _expected_digest(sums_url: str, timeout: float = 30) -> str:
     return ""
 
 
-def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
+def _spawn_swapper(exe: Path, new: Path, port: int = 6733, version: str = "") -> None:
     # ponytail: a shell script that waits for our PID is the whole updater; a
     # signed installer/MSIX is the upgrade path if code signing ever lands.
     pid = os.getpid()
+    # "Came up" = the dashboard reports the version we installed, not merely that
+    # something listens on the port. The tag is remote text: keep it to [0-9A-Za-z.-].
+    version = "".join(c for c in version.lstrip("v") if c.isalnum() or c in ".-")
+    old = exe.with_name(exe.name + ".old")  # the previous binary, kept for a manual rollback
     if sys.platform == "win32":
         script = Path(tempfile.gettempdir()) / "lumen-update.cmd"
         # The pauses here are the whole trick, and they have to be `ping`. This
@@ -168,11 +178,14 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
         # spaces is not split into command + arguments.
         launch = (f"schtasks /create /tn {task} /tr \"'{exe}'\" /sc once /st 23:59 /f >nul 2>&1\r\n"
                   f"schtasks /run /tn {task} >nul 2>&1")
-        probe = f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul"
+        # curl.exe ships with Windows 10 1803+ and needs no console.
+        probe = (f"curl.exe -s -m 3 http://127.0.0.1:{port}/api/state | findstr /c:\"\\\"version\\\": \\\"{version}\\\"\" >nul"
+                 if version else f"netstat -ano | findstr /r /c:\":{port} .*LISTENING\" >nul")
         log = str(paths.data_dir() / "update.log")
         script.write_text(
             "@echo off\r\n"
             f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
+            f"copy /y \"{exe}\" \"{old}\" >nul 2>&1\r\n"
             f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
             f"echo %DATE% %TIME% swapped in the new binary >>\"{log}\"\r\n"
             "ping -n 4 127.0.0.1 >nul\r\n"
@@ -207,17 +220,25 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733) -> None:
         with tempfile.NamedTemporaryFile(mode="w", prefix="lumen-update-", suffix=".sh",
                                          encoding="utf-8", newline="\n", delete=False) as f:
             script = Path(f.name)
+            expected = shlex.quote(f'"version": "{version}' + ('"' if version else ""))
             f.write(
                 "#!/bin/sh\n"
                 f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
+                f"cp -f {quoted_exe} {shlex.quote(str(old))} 2>/dev/null\n"
                 f"mv -f {shlex.quote(str(new))} {quoted_exe} && chmod +x {quoted_exe} && sleep 3\n"
                 # Same start-and-probe as on Windows; `sleep` needs no console here,
                 # but a first launch can still be slow enough to be worth a retry.
-                "for try in 1 2 3 4; do\n"
+                # Without curl there is nothing to probe with, and a failed probe
+                # must never be read as a failed start: launch once, kill nothing.
+                "if command -v curl >/dev/null 2>&1; then\n"
+                "  for try in 1 2 3 4; do\n"
+                f"    nohup {quoted_exe} >/dev/null 2>&1 &\n"
+                "    sleep 15\n"
+                f"    curl -fsS -m 3 http://127.0.0.1:{port}/api/state 2>/dev/null | grep -qF {expected} && break\n"
+                f"    pkill -f {quoted_exe}\n"
+                "  done\n"
+                "else\n"
                 f"  nohup {quoted_exe} >/dev/null 2>&1 &\n"
-                "  sleep 15\n"
-                f"  lsof -nP -iTCP:{port} -sTCP:LISTEN >/dev/null 2>&1 && break\n"
-                f"  pkill -f {quoted_exe}\n"
-                "done\n"
+                "fi\n"
                 f"rm -f {shlex.quote(str(script))}\n")
         subprocess.Popen(["/bin/sh", str(script)], start_new_session=True, close_fds=True)
