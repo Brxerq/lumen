@@ -24,7 +24,7 @@ def list_runs(repo: str, limit: int = 10) -> list[dict]:
     flags: dict[str, Any] = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
     out = subprocess.run(["gh", "run", "list", "--repo", repo, "--limit", str(limit),
                           "--json", "databaseId,status,conclusion,name,headBranch,workflowName"],
-                         capture_output=True, text=True, timeout=30, **flags)
+                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, **flags)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip()[:200] or "gh failed")
     return json.loads(out.stdout or "[]")
@@ -67,12 +67,12 @@ class GitHub(Integration):
             self._stop.wait(interval)
 
     def _poll(self) -> None:
+        errors = []
         for repo in self.repos():
             try:
                 runs = list_runs(repo)
-                self._error = ""
             except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
-                self._error = f"{repo}: {e}"
+                errors.append(f"{repo}: {e}")  # a later repo's success must not hide this one
                 continue
             done = {r["databaseId"]: r for r in runs if r.get("status") == "completed"}
             if repo not in self._seen:
@@ -82,11 +82,15 @@ class GitHub(Integration):
                 if run_id in self._seen[repo]:
                     continue
                 self._seen[repo].add(run_id)
-                ok = run.get("conclusion") == "success"
+                conclusion = run.get("conclusion")
+                if conclusion not in ("success", "failure", "timed_out", "startup_failure"):
+                    continue  # cancelled (a newer push superseded it), skipped, neutral: nothing failed
+                ok = conclusion == "success"
                 self.emit(Event("github.workflow.succeeded" if ok else "github.workflow.failed", "github", {
                     "repo": repo, "workflow": run.get("workflowName") or run.get("name", ""),
                     "branch": run.get("headBranch", ""), "conclusion": run.get("conclusion", ""), "run_id": run_id,
                 }))
+        self._error = "; ".join(errors)
 
     def status(self) -> dict:
         if not shutil.which("gh"):

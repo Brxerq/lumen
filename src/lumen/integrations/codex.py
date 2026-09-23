@@ -98,14 +98,17 @@ def turn_open(rollout: Path, session_id: str | None = None) -> bool:
 
 
 def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), metadata: dict[str, dict] | None = None,
-                   recover: bool = False) -> dict[str, bool]:
+                   recover: bool = False, watch=()) -> dict[str, bool]:
     """thread_id -> turn open, for recently touched threads plus every hooked
     one (no freshness cutoff there: a closed or archived rollout must keep
-    overriding a stuck hook file)."""
+    overriding a stuck hook file). `watch` ids (already on a zone, no hook) are
+    looked up by id so a quiet running turn is not lost, but once finished and
+    idle - or archived - they leave like any other unhooked task."""
     now = now or time.time()
     cutoff_ms = int((now - ACTIVE_WINDOW_S) * 1000)
     discovery_cutoff_ms = int((now - RECOVERY_WINDOW_S) * 1000) if recover else cutoff_ms
     hooked = list(hooked)
+    ids = hooked + [w for w in watch if w not in hooked]
     if not db.is_file():
         return {}
     try:
@@ -118,7 +121,7 @@ def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), met
             rows = conn.execute(
                 f"select id, rollout_path, archived, updated_at_ms, {optional('cwd')}, {optional('title')}, {optional('source')} from threads "
                 "where (archived = 0 and updated_at_ms > ?) or id in (%s)"
-                % ",".join("?" * len(hooked)), (discovery_cutoff_ms, *hooked)
+                % ",".join("?" * len(ids)), (discovery_cutoff_ms, *ids)
             ).fetchall()
     except TrackingUnavailable:
         raise
@@ -130,6 +133,8 @@ def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), met
         if _is_internal(source):
             continue
         if archived:
+            if tid not in hooked:
+                continue  # archived and nothing claims it: gone, not a zone forever
             out[tid] = out.get(tid, False)
             if metadata is not None:
                 metadata[str(tid)] = {"archived": True}
@@ -176,8 +181,10 @@ class Codex(AgentIntegration):
         known = {s["id"] for s in self.sessions}
         # A quiet tool/delegated turn can stop updating both the thread row and
         # rollout for several minutes. Once observed, keep checking its exact
-        # ID until Codex gives us a terminal/archived record.
-        states = rollout_states(hooked=list(set(hooked) | known), metadata=self._fallback_records,
+        # ID until Codex gives us a terminal/archived record. Passing these as
+        # `hooked` used to exempt them from every cutoff: finished tasks stayed
+        # on the keyboard for good.
+        states = rollout_states(hooked=list(hooked), watch=list(known - set(hooked)), metadata=self._fallback_records,
                                 recover=not getattr(self, "_recovered", False) or self._force_sync)
         self._recovered = True  # a failed first read must retry startup recovery
         return states

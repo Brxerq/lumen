@@ -29,9 +29,9 @@ class Event:
 
 # type -> (label, description, filterable data keys with example values)
 CATALOG: dict[str, dict] = {
-    "agent.running":     {"label": "AI agent started working",   "fields": {"agent": ["claude", "codex"]}},
-    "agent.needs_input": {"label": "AI agent is waiting for you", "fields": {"agent": ["claude", "codex"]}},
-    "agent.finished":    {"label": "AI agent finished its task",  "fields": {"agent": ["claude", "codex"]}},
+    "agent.running":     {"label": "AI agent started working",   "fields": {"agent": ["claude", "codex", "gemini"]}},
+    "agent.needs_input": {"label": "AI agent is waiting for you", "fields": {"agent": ["claude", "codex", "gemini"]}},
+    "agent.finished":    {"label": "AI agent finished its task",  "fields": {"agent": ["claude", "codex", "gemini"]}},
     "agents.status":     {"label": "Overall agent status changed", "fields": {"status": ["running", "input", "done"]}},
     "agents.sessions":   {"label": "Any agent session changed (per-tab)", "fields": {"status": ["running", "input", "done"]}},
     # usage limits: the fields are numbers, so the filter is a threshold (">= 90"), see rules._match_value
@@ -39,6 +39,12 @@ CATALOG: dict[str, dict] = {
                                                                              "seven_day_used": [">= 50", ">= 70", ">= 90"]}},
     "codex.usage":       {"label": "Codex usage limits changed", "fields": {"five_hour_used": [">= 50", ">= 70", ">= 90"],
                                                                             "seven_day_used": [">= 50", ">= 70", ">= 90"]}},
+    "gemini.usage":      {"label": "Gemini / Antigravity usage limits changed", "fields": {"five_hour_used": [">= 50", ">= 70", ">= 90"],
+                                                                                    "daily_used": [">= 50", ">= 70", ">= 90"]}},
+    # per tab: "agent.finished" fires only once every tab of that agent is done
+    "agent.session.running":     {"label": "One agent tab started working", "fields": {"agent": ["claude", "codex", "gemini"]}},
+    "agent.session.needs_input": {"label": "One agent tab is waiting for you", "fields": {"agent": ["claude", "codex", "gemini"]}},
+    "agent.session.finished":    {"label": "One agent tab finished", "fields": {"agent": ["claude", "codex", "gemini"]}},
     "command.succeeded": {"label": "Command finished (exit 0)",   "fields": {"name": []}},
     "command.failed":    {"label": "Command failed (exit != 0)",  "fields": {"name": []}},
     "build.succeeded":   {"label": "Build succeeded",             "fields": {"name": []}},

@@ -21,7 +21,7 @@ def test_unix_swapper_quotes_paths_and_uses_unique_scripts(tmp_path, monkeypatch
         move = shlex.split(next(line for line in lines if line.startswith("mv ")))
         assert move[:7] == ["mv", "-f", str(new), str(exe), "&&", "chmod", "+x"]
         assert move[7] == str(exe)
-        launch = shlex.split(next(line for line in lines if "nohup " in line))
+        launch = shlex.split(next(line.strip() for line in lines if line.strip().startswith("nohup ")))
         assert launch[1] == str(exe)
         stop = shlex.split(next(line for line in lines if "pkill " in line))
         assert stop == ["pkill", "-f", str(exe)]
@@ -49,7 +49,9 @@ def test_unix_swapper_probes_the_version_and_never_kills_without_curl(tmp_path, 
     assert "lsof" not in body and '"version": "0.8.2"' in body
     with_curl, without_curl = body.split("\nelse\n")
     assert "command -v curl" in with_curl and "pkill" in with_curl and "pkill" not in without_curl
-    assert f"cp -f {shlex.quote(str(exe))} {shlex.quote(str(exe) + '.old')}" in body
+    # apply() keeps the .old copy before this runs; a failed mv restarts the old binary and stops
+    move = next(line for line in body.splitlines() if line.startswith("mv "))
+    assert f"|| {{ nohup {shlex.quote(str(exe))}" in move and "exit 0" in move
 
 
 def test_release_is_not_offered_until_its_checksums_are_published(monkeypatch):

@@ -24,7 +24,7 @@ from lumen.core.integrations import Integration
 
 SHELL_SNIPPET = r"""
 # Lumen: notify when a command that took > 30 s finishes (bash/zsh)
-__lumen_pre() { __lumen_t0=$SECONDS; __lumen_cmd=$1; }
+__lumen_pre() { [ "$1" = "__lumen_post" ] && return; [ -n "$__lumen_t0" ] && return; __lumen_t0=$SECONDS; __lumen_cmd=$1; }
 __lumen_post() {
   local code=$? ; [ -z "$__lumen_t0" ] && return
   local dt=$((SECONDS - __lumen_t0)); unset __lumen_t0

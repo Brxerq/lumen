@@ -30,6 +30,19 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      # A tag the code disagrees with ships a binary that reports another
+      # version: the updater offers it forever and its restart probe kills a
+      # healthy daemon. `python scripts/bump.py X.Y.Z` sets all of these.
+      - name: Tag, package and plugin versions agree
+        run: |
+          code=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/lumen/__init__.py)
+          plugin=$(python3 -c 'import json; print(json.load(open("plugin/.claude-plugin/plugin.json"))["version"])')
+          echo "tag $TAG, __version__ $code, plugin.json $plugin"
+          if [ "$TAG" != "v$code" ] || [ "$TAG" != "v$plugin" ]; then
+            echo "::error::tag $TAG does not match __version__ $code / plugin.json $plugin; run scripts/bump.py"
+            exit 1
+          fi
       - name: Create the draft release
         run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --generate-notes --title "$TAG"
 

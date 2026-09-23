@@ -161,9 +161,14 @@ class Engine:
         else:
             self.player.paused.clear()
             self.scan()
+            for d in self.devices:  # catch up on what changed while paused (scan only replays new devices)
+                if d.details.get("enabled", True):
+                    self._replay_persistent(d)
 
     # --- devices -------------------------------------------------------------
     def scan(self) -> list[devmod.Device]:
+        if self.paused and not self.config.settings.get("keep_lit"):
+            return self.devices  # paused hands the hardware back; a rescan would grab it again
         if not self._scan_lock.acquire(blocking=False):
             return self.devices
         self.scanning = True
@@ -237,7 +242,16 @@ class Engine:
             if d.id == device_id:
                 if "name" in patch:
                     d.name = patch["name"] or d.name
+                was = d.details.get("enabled", True)
                 d.details["enabled"] = opts.get("enabled", True)
+                if was and not d.details["enabled"]:
+                    try:  # switched off means dark, not frozen on its last colour
+                        d.off()
+                    except Exception:
+                        pass
+                elif d.details["enabled"] and not was:
+                    self.player.set_devices([x for x in self.devices if x.details.get("enabled", True)])
+                    self._replay_persistent(d)  # back on: show the current status, not nothing
         self.player.set_devices([d for d in self.devices if d.details.get("enabled", True)])
         self._sync_player()
         if "brightness" in patch:
@@ -278,7 +292,10 @@ class Engine:
         self.activity.append({**event.to_dict(), "rules": fired})
         self.bump()
         if self.config.settings.get("log_events"):
-            print(f"{time.strftime('%H:%M:%S')} event {event.type} {event.data} -> {fired or 'no rule'}", flush=True)
+            # agents.sessions carries every tab's full record; unabridged it grew the log by tens of MB a day.
+            data = str(event.data)
+            data = data if len(data) <= 300 else data[:300] + "…"
+            print(f"{time.strftime('%H:%M:%S')} event {event.type} {data} -> {fired or 'no rule'}", flush=True)
 
     def reapply(self) -> None:
         """Re-run the persistent actions of every rule against the last event of
@@ -294,8 +311,11 @@ class Engine:
                     continue
                 for index, action in enumerate(rule.actions):
                     if EFFECTS.get(action.effect, {}).get("persistent"):
-                        self.player.run(action, event)
                         persistent[(rule.id, index)] = (action, event)
+        # Replay in the order the events happened, not the order the rules are
+        # listed: a failure at 10:00 then a success at 10:05 must end green.
+        for action, event in sorted(persistent.values(), key=lambda pair: pair[1].ts):
+            self.player.run(action, event)
         self._persistent = persistent
         self.bump()
 
@@ -347,7 +367,9 @@ class Engine:
             "devices": [{**d.to_dict(), "color": self.player.current_color(d.id),
                          "brightness": self.config.device_options(d.id).get("brightness", 1.0),
                          "zone_colors": self.player.current_zones(d.id)} for d in self.devices],
-            "forgotten_devices": self.config.saved_device_ids(exclude={d.id for d in self.devices}),
+            # Adapter setup (the Hue pairing) lives in the same map; it is not a device to forget.
+            "forgotten_devices": self.config.saved_device_ids(
+                exclude={d.id for d in self.devices} | {name.rsplit(".", 1)[-1] for name in devmod.BUILTIN_ADAPTERS}),
             "integrations": [i.to_dict() for i in self.integrations],
             "sessions": sorted((s for i in self.integrations for s in getattr(i, "sessions", [])),
                                key=lambda s: s.get("slot", 0)),

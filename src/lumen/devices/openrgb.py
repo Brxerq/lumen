@@ -152,7 +152,12 @@ def discover(settings: dict | None = None) -> list[Device]:
     if time.monotonic() < _retry_after:
         return []
     if not _port_open():
-        if not settings.get("launch_openrgb", True) or not launch_server():
+        if not settings.get("launch_openrgb", True):
+            return []
+        if not launch_server():
+            # Installed but slow to open its port (SMBus enumeration can take a
+            # while): without a back-off every rescan started another copy.
+            _retry_after = time.monotonic() + RETRY_AFTER_S
             return []
     try:
         client = _connect()

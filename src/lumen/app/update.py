@@ -16,9 +16,11 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -72,25 +74,41 @@ def check(timeout: float = 8) -> dict:
     }
 
 
+_applying = threading.Lock()  # two clicks must not download into one .new and share one script
+
+
 def apply(on_ready, port: int = 6733) -> str:
     """Download, stage the swap script, then call on_ready() (the caller exits)."""
+    if not _applying.acquire(blocking=False):
+        return "An update is already in progress."
+    try:
+        message, started = _apply(on_ready, port)
+    except BaseException:
+        _applying.release()
+        raise
+    if not started:
+        _applying.release()  # held for good once the swap is under way: this process is exiting
+    return message
+
+
+def _apply(on_ready, port: int) -> tuple[str, bool]:
     info = check()
     if not info.get("newer", info["available"]):
-        return "Already up to date."
+        return "Already up to date.", False
     if not info["frozen"]:
         # Not `pip install -U lumen`: the name on PyPI belongs to an unrelated
         # project, so an upgrade has to name this repository.
-        return "Source install: run `pip install --upgrade git+https://github.com/Brxerq/lumen`."
+        return "Source install: run `pip install --upgrade git+https://github.com/Brxerq/lumen`.", False
     if not info["asset"]:
-        return f"Release {info['latest']} has no {ASSET} asset yet."
+        return f"Release {info['latest']} has no {ASSET} asset yet.", False
     if not info["asset"].startswith(DOWNLOAD_PREFIX):
-        return "Refusing: asset is not hosted on the project's GitHub releases."
+        return "Refusing: asset is not hosted on the project's GitHub releases.", False
     if not info["sums"]:
-        return f"Release {info['latest']} has no {SUMS}, so the download cannot be verified; aborted."
+        return f"Release {info['latest']} has no {SUMS}, so the download cannot be verified; aborted.", False
 
     expected = _expected_digest(info["sums"])
     if not expected:
-        return f"{SUMS} does not list {ASSET}; aborted."
+        return f"{SUMS} does not list {ASSET}; aborted.", False
 
     exe = Path(sys.executable).resolve()
     new = exe.with_suffix(exe.suffix + ".new")
@@ -101,13 +119,41 @@ def apply(on_ready, port: int = 6733) -> str:
             f.write(chunk)
     if new.stat().st_size < 1_000_000:
         new.unlink(missing_ok=True)
-        return "Downloaded file looks wrong (too small); aborted."
+        return "Downloaded file looks wrong (too small); aborted.", False
     if digest.hexdigest() != expected:
         new.unlink(missing_ok=True)
-        return "The download does not match the checksum published with the release; aborted."
+        return "The download does not match the checksum published with the release; aborted.", False
+    if sys.platform == "win32" and (blocked := _launch_blocked(new)):
+        new.unlink(missing_ok=True)
+        return blocked, False
+    # Keep the running binary before anything replaces it, and stop if that
+    # fails: the script's own `copy` failed silently on a OneDrive folder and
+    # left no way back.
+    try:
+        shutil.copy2(exe, exe.with_name(exe.name + ".old"))
+    except OSError as e:
+        new.unlink(missing_ok=True)
+        return f"Could not keep a copy of the current version ({e.strerror or e}); nothing was changed.", False
     _spawn_swapper(exe, new, port, info["latest"])
     on_ready()
-    return f"Updating to {info['latest']} — Lumen restarts in a moment."
+    return f"Updating to {info['latest']} — Lumen restarts in a moment.", True
+
+
+def _launch_blocked(new: Path) -> str:
+    """Why Windows will not run the downloaded binary, or "" if it will.
+
+    Smart App Control and other application-control policies refuse unsigned
+    executables they have no reputation for. Found out only after the swap,
+    that left no Lumen running at all. `hook` with empty stdin exits at once."""
+    try:
+        subprocess.run([str(new), "hook"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=60, creationflags=0x08000000)
+    except subprocess.TimeoutExpired:
+        return ""  # slow first start (a virus scan): it ran, which is all this asks
+    except OSError as e:
+        return (f"Windows blocked the new version ({e.strerror or e}). Smart App Control or an application "
+                "control policy refuses unsigned downloads; install it from the releases page instead. Nothing was changed.")
+    return ""
 
 
 def _expected_digest(sums_url: str, timeout: float = 30) -> str:
@@ -185,8 +231,16 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733, version: str = "") ->
         script.write_text(
             "@echo off\r\n"
             f":wait\r\ntasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
-            f"copy /y \"{exe}\" \"{old}\" >nul 2>&1\r\n"
-            f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
+            # (the previous binary was already copied to .old by apply())
+            "set /a moves=0\r\n"
+            f":copy\r\nmove /y \"{new}\" \"{exe}\" >nul 2>&1 && goto swapped\r\n"
+            "set /a moves+=1\r\n"
+            "if %moves% LSS 30 (ping -n 2 127.0.0.1 >nul & goto copy)\r\n"
+            # Still locked after a minute: the old binary is untouched, so start it again.
+            f"echo %DATE% %TIME% could not replace the binary; restarting the current one >>\"{log}\"\r\n"
+            f"{launch}\r\n"
+            "goto end\r\n"
+            ":swapped\r\n"
             f"echo %DATE% %TIME% swapped in the new binary >>\"{log}\"\r\n"
             "ping -n 4 127.0.0.1 >nul\r\n"
             "set /a tries=0\r\n"
@@ -204,7 +258,14 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733, version: str = "") ->
             "set /a tries+=1\r\n"
             f"echo %DATE% %TIME% no dashboard on port {port} after 30s, retry %tries% >>\"{log}\"\r\n"
             "if %tries% LSS 3 goto launch\r\n"
-            f"echo %DATE% %TIME% GAVE UP - start Lumen by hand >>\"{log}\"\r\n"
+            # Put the binary that was running a minute ago back rather than
+            # leaving no Lumen at all. The version probe no longer applies.
+            f"if not exist \"{old}\" goto gaveup\r\n"
+            f"move /y \"{old}\" \"{exe}\" >nul 2>&1\r\n"
+            f"echo %DATE% %TIME% new version never answered; restored the previous binary >>\"{log}\"\r\n"
+            f"{launch}\r\n"
+            "goto end\r\n"
+            f":gaveup\r\necho %DATE% %TIME% GAVE UP - start Lumen by hand >>\"{log}\"\r\n"
             "goto end\r\n"
             f":done\r\necho %DATE% %TIME% up and answering on port {port} >>\"{log}\"\r\n"
             ":end\r\n"
@@ -224,19 +285,28 @@ def _spawn_swapper(exe: Path, new: Path, port: int = 6733, version: str = "") ->
             f.write(
                 "#!/bin/sh\n"
                 f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
-                f"cp -f {quoted_exe} {shlex.quote(str(old))} 2>/dev/null\n"
-                f"mv -f {shlex.quote(str(new))} {quoted_exe} && chmod +x {quoted_exe} && sleep 3\n"
+                # (the previous binary was already copied to .old by apply())
+                # A failed swap leaves the old binary in place: start it and stop,
+                # rather than probing it for the new version and killing it 4 times.
+                f"mv -f {shlex.quote(str(new))} {quoted_exe} && chmod +x {quoted_exe} || "
+                f"{{ nohup {quoted_exe} >/dev/null 2>&1 & rm -f {shlex.quote(str(script))}; exit 0; }}\n"
+                "sleep 3\n"
                 # Same start-and-probe as on Windows; `sleep` needs no console here,
                 # but a first launch can still be slow enough to be worth a retry.
                 # Without curl there is nothing to probe with, and a failed probe
                 # must never be read as a failed start: launch once, kill nothing.
                 "if command -v curl >/dev/null 2>&1; then\n"
+                "  ok=\n"
                 "  for try in 1 2 3 4; do\n"
                 f"    nohup {quoted_exe} >/dev/null 2>&1 &\n"
                 "    sleep 15\n"
-                f"    curl -fsS -m 3 http://127.0.0.1:{port}/api/state 2>/dev/null | grep -qF {expected} && break\n"
+                f"    curl -fsS -m 3 http://127.0.0.1:{port}/api/state 2>/dev/null | grep -qF {expected} && {{ ok=1; break; }}\n"
                 f"    pkill -f {quoted_exe}\n"
                 "  done\n"
+                # Never leave no Lumen at all: put the previous binary back.
+                f"  if [ -z \"$ok\" ] && [ -f {shlex.quote(str(old))} ]; then\n"
+                f"    mv -f {shlex.quote(str(old))} {quoted_exe} && nohup {quoted_exe} >/dev/null 2>&1 &\n"
+                "  fi\n"
                 "else\n"
                 f"  nohup {quoted_exe} >/dev/null 2>&1 &\n"
                 "fi\n"

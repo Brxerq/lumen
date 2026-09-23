@@ -20,14 +20,21 @@ def command() -> list[str]:
 
 
 def enabled() -> bool:
+    """Whether login starts *this* Lumen. An entry pointing at another copy
+    (an old download on the Desktop, a source checkout) used to read as "on"
+    while logon started something else; toggling fixes it by rewriting it."""
     if sys.platform == "win32":
         import winreg
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
-                return bool(winreg.QueryValueEx(key, "Lumen")[0])
+                value = str(winreg.QueryValueEx(key, "Lumen")[0] or "")
         except OSError:
             return False
-    return _unix_file().exists()
+        return value.strip().lower() == subprocess.list2cmdline(command()).lower()
+    try:
+        return _unix_file().read_text(encoding="utf-8") == (_plist() if sys.platform == "darwin" else _desktop())
+    except OSError:
+        return False
 
 
 def launch_background(open_ui: bool = False, wait_s: float = 20.0) -> None:

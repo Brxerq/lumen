@@ -207,7 +207,8 @@ function renderDashboard(st) {
   else if (needs) { tone = "attn"; headline = `${needs} ${needs === 1 ? "task is" : "tasks are"} waiting for you`; }
   else if (busy) { tone = "busy"; headline = `${busy} ${busy === 1 ? "task is" : "tasks are"} working`; }
   const sub = S.error ? "Showing the last received state. Lumen will reconnect automatically."
-    : st.paused ? "Your devices are back under their own control. Resume to run your automations."
+    : st.paused ? (st.settings?.keep_lit ? "Your devices hold their current colours and ignore events. Resume to run your automations."
+      : "Your devices are back under their own control. Resume to run your automations.")
     : needs ? "An agent needs your input. Check your open tabs to keep things moving."
     : busy ? "Your agents are at work. Follow their progress here and on your devices."
     : "Lumen is listening. Your agents’ progress will appear below.";
@@ -423,7 +424,7 @@ function sessionList(st) {
       ondragstart="L.dragStart(event,'${js(s.id)}')" ondragover="L.dragOver(event)" ondrop="L.drop(event,'${js(s.id)}')" ondragend="L.dragEnd()">
       <span class="grip" aria-hidden="true" title="Drag to arrange device slots; running sessions stay first in this list">⠿</span>
       <span class="slot ${placed || sharing ? h(s.status) : "unplaced"}" title="${placed ? `Tab ${i + 1}, left to right on your devices`
-      : sharing ? `Shown on ${deviceById(sharing)?.name || sharing}, in one colour with the other tabs` : `Tab ${i + 1}. Every zone is taken by a tab further up`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${i + 1}</span>
+      : sharing ? `Shown on ${h(deviceById(sharing)?.name || sharing)}, in one colour with the other tabs` : `Tab ${i + 1}. Every zone is taken by a tab further up`}" ${lit ? `style="box-shadow:0 0 0 2px ${lit} inset"` : ""}>${i + 1}</span>
       <div class="row-main">
         <div class="row-title"><input class="name-edit" value="${h(editName)}" placeholder="${h(name)}" aria-label="Name for this tab"
           title="Rename this tab" onchange="L.labelSession('${js(s.id)}', this.value)"></div>
@@ -475,7 +476,7 @@ function collapse(activity) {
 }
 
 function feedItem(a) {
-  const data = Object.entries(a.data || {}).filter(([k]) => k !== "agents").map(([k, v]) => k === "sessions" ? `${v.length} tab${v.length === 1 ? "" : "s"}` : `${k}: ${v}`).join(" · ");
+  const data = Object.entries(a.data || {}).filter(([k]) => k !== "agents").map(([k, v]) => k === "sessions" && Array.isArray(v) ? `${v.length} tab${v.length === 1 ? "" : "s"}` : `${k}: ${typeof v === "object" && v ? JSON.stringify(v) : v}`).join(" · ");
   return `<div class="feed-item"><span class="feed-icon ${TYPE_TONE(a.type)}"><i></i></span><div class="feed-body">
     <span class="feed-title" title="${h(a.type)}">${h(label(a.type))}${a.repeats ? ` <span class="dim small">×${a.repeats}</span>` : ""}</span>
     <span class="feed-rules">${a.rules?.length ? "ran <b>" + a.rules.map(h).join("</b>, <b>") + "</b>" : "no automation matched"}${data ? " · " + h(data) : ""}</span>
@@ -749,7 +750,7 @@ function renderSettings(st) {
   <details class="disclosure" id="settings-devices"><summary><span>Devices &amp; lighting<small>Device discovery and playback</small></span></summary><div class="rows">
     ${row("Start OpenRGB automatically", "Launches the OpenRGB server when it is installed but not running.", tog("launch_openrgb"))}
     ${row("Look for new devices every", "Seconds between background scans. Set to 0 to scan only when you press the button.", `<input type="number" class="input num" min="0" aria-label="Seconds between device scans" value="${s.rescan_interval_s}" onchange="L.setting('rescan_interval_s', +this.value)">`)}
-    ${row(st.paused ? "Lumen is paused" : "Lumen is running", st.paused ? "Your devices are back under their own control." : "Automations are reacting to events.", `<button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>`)}
+    ${row(st.paused ? "Lumen is paused" : "Lumen is running", st.paused ? (s?.keep_lit ? "Devices hold their colours and ignore events." : "Your devices are back under their own control.") : "Automations are reacting to events.", `<button class="btn ${st.paused ? "primary" : ""}" onclick="L.pause(${!st.paused})">${st.paused ? "Resume" : "Pause"}</button>`)}
   </div></details>
 
   <details class="disclosure" id="settings-advanced"><summary><span>Advanced &amp; troubleshooting<small>Logs, webhook security and local API</small></span></summary><div class="rows">
@@ -962,7 +963,7 @@ const L = window.L = {
   // takes the device out of the automation entirely.
   patchDeviceSessions(id, patch) {
     const st = S.state;
-    const carries = pick => st.rules.find(r => r.actions.some(a => a.effect === "sessions" && pick(a.device)));
+    const carries = pick => st.rules.find(r => r.enabled && r.actions.some(a => a.effect === "sessions" && pick(a.device)));
     // The rule that already paints THIS device, not merely the first one with a
     // session action: a setup with "Claude on the keyboard" and "Codex on the
     // light bar" is two rules, and editing the wrong one adds a second action
@@ -1079,7 +1080,7 @@ const L = window.L = {
   adapter: (name, action, params) => act(() => api("POST", `/api/adapters/${name}/${action}`, params), r => r.message),
   emit: (type, data) => act(() => api("POST", "/api/events", { type, data: data || {}, source: "dashboard" }), `fired ${type}`),
   fire() {
-    const data = Object.fromEntries($("#fire-data").value.split("\n").filter(l => l.includes("=")).map(l => l.split("=", 2).map(s => s.trim())));
+    const data = Object.fromEntries($("#fire-data").value.split("\n").filter(l => l.includes("=")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
     return L.emit($("#fire-type").value, data);
   },
   connect: (id, off) => act(() => api("POST", `/api/integrations/${id}/${off ? "disconnect" : "connect"}`), r => r.message).then(r => { const m = $(`#msg-${id}`); if (m && r) m.textContent = r.message; if (S.wizard) renderWizard(); }),
@@ -1131,7 +1132,7 @@ const L = window.L = {
   saveRule() {
     const problem = ruleProblem(S.draft);
     if (problem) return toast(problem, true);
-    return act(() => api("POST", "/api/rules", S.draft), "saved").then(() => L.closeModal());
+    return act(() => api("POST", "/api/rules", S.draft), "saved").then(r => { if (r) L.closeModal(); });
   },
   closeModal() { $("#modal-root").innerHTML = ""; S.draft = null; },
   openWizard,

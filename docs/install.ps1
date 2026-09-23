@@ -28,7 +28,8 @@ try {
 
     # A running daemon holds its own file open. Only the copy being replaced:
     # a Lumen started from somewhere else is not this script's business.
-    Get-Process lumen -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force
+    $wasRunning = @(Get-Process lumen -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+    $wasRunning | Stop-Process -Force
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Move-Item "$tmp\lumen.exe" $exe -Force
 } finally {
@@ -51,6 +52,8 @@ if (-not $custom -and ($userPath -split ';') -notcontains $dir) {
 if (($env:Path -split ';') -notcontains $dir) { $env:Path = "$($env:Path.TrimEnd(';'));$dir" }
 
 Write-Host "Installed $exe"
+# A reinstall stopped the running copy above; do not leave it stopped.
+if ($wasRunning.Count) { Start-Process $exe; Write-Host "Restarted Lumen." }
 if ($custom) {
     Write-Host "Run it with: lumen  (this shell only - add $dir to your PATH to keep it)"
 } else {

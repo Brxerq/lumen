@@ -26,6 +26,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from lumen import paths
+
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code's own OAuth client
@@ -161,12 +163,15 @@ def renew(data: dict, now: float | None = None) -> dict | None:
                expiresAt=int((now + float(fresh.get("expires_in") or 3600)) * 1000))
     if fresh.get("refresh_token"):
         new["refreshToken"] = fresh["refresh_token"]
+    # The server may have rotated the refresh token: losing this write would
+    # leave Claude Code holding a revoked one. write_atomic retries the replace
+    # Windows refuses while Claude has the file open, and never leaves a temp
+    # copy of live tokens behind.
     try:
-        tmp = CREDENTIALS_FILE.with_suffix(".json.lumen")
-        tmp.write_text(json.dumps(dict(data, claudeAiOauth=new)), encoding="utf-8")
-        tmp.replace(CREDENTIALS_FILE)
-    except OSError:
-        pass  # still good for this poll; the file keeps the old pair
+        paths.write_atomic(CREDENTIALS_FILE, json.dumps(dict(data, claudeAiOauth=new)))
+    except OSError as e:
+        print(f"claude: could not save the renewed login ({type(e).__name__}); Claude Code may ask you to sign in again",
+              flush=True)
     return new
 
 

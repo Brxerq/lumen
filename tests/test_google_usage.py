@@ -28,11 +28,9 @@ def test_google_usage_summarize_various_payloads():
     assert gu.label("gemini_flash") == "Gemini Flash"
 
 
-def test_google_usage_credentials_and_refresh(tmp_path, monkeypatch):
+def test_google_usage_refresh_reads_the_local_file(tmp_path, monkeypatch):
     monkeypatch.setattr(gu, "_latest", None)
-    fake_token = {"access_token": "ya29.test", "type": "gemini"}
-    monkeypatch.setattr(gu, "credentials", lambda: fake_token)
-    monkeypatch.setattr(gu, "fetch", lambda tok, **kw: {"daily": {"utilization": 25.0}})
+    monkeypatch.setattr(gu, "read_local_antigravity_usage", lambda: {"daily": {"utilization": 25.0}})
 
     res = gu.refresh()
     assert res is not None
@@ -40,11 +38,12 @@ def test_google_usage_credentials_and_refresh(tmp_path, monkeypatch):
     assert gu.latest() == res
 
 
-def test_google_credentials_do_not_invent_zero_usage(monkeypatch):
+def test_google_usage_does_not_invent_zero_usage(monkeypatch):
     monkeypatch.setattr(gu, "_latest", None)
-    monkeypatch.setattr(gu, "credentials", lambda: {"access_token": "test"})
-    monkeypatch.setattr(gu, "fetch", lambda *a: None)
     monkeypatch.setattr(gu, "read_local_antigravity_usage", lambda: None)
+    assert gu.refresh() is None
+    assert "no quota file" in gu.detail()
+    monkeypatch.setattr(gu, "read_local_antigravity_usage", lambda: {"junk": 1})
     assert gu.refresh() is None
     assert "unavailable" in gu.detail()
 

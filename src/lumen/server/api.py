@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hmac
 import json
-import mimetypes
+import math
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +42,25 @@ from lumen.core.rules import Rule
 UI_DIR = Path(__file__).with_name("ui")
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
 MAX_BODY_BYTES = 1024 * 1024  # no dashboard payload is anywhere near this big
+# Not mimetypes: on Windows it reads the registry, which some installers leave
+# saying .js is text/plain — and a browser then refuses to run the dashboard.
+CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                 ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
+                 ".ico": "image/x-icon", ".json": "application/json"}
+FORWARDED_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "Forwarded", "X-Real-IP")
+
+
+def _finite(text: str) -> float:
+    """json.loads turns NaN, Infinity and 1e999 into floats that json.dumps then
+    writes back as bare `Infinity` — which the dashboard cannot parse, forever."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("numbers must be finite")
+    return value
+
+
+def _no_constant(name: str):
+    raise ValueError(f"{name} is not a number")
 
 
 def _session_id(value) -> str:
@@ -72,8 +91,12 @@ def _origin_is_local(header: str | None, port: int) -> bool:
         return True
     if header == "null":
         return False
-    parsed = urlparse(header)
-    if parsed.scheme != "http" or parsed.port not in (port, None):
+    try:
+        parsed = urlparse(header)
+        # The dashboard's own origin always names our port; none would be :80.
+        if parsed.scheme != "http" or parsed.port != port:
+            return False
+    except ValueError:  # a port that is not a number
         return False
     return (parsed.hostname or "").lower() in ("127.0.0.1", "localhost", "::1")
 
@@ -163,9 +186,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not length:
             return {}
         try:
-            data = json.loads(self.rfile.read(length) or b"{}")
-        except ValueError:
-            return {}
+            data = json.loads(self.rfile.read(length) or b"{}", parse_float=_finite, parse_constant=_no_constant)
+        except ValueError as ex:  # a bad body must not read as "empty" — PUT /api/rules would wipe every rule
+            self._json(400, {"error": f"invalid JSON: {ex}"})
+            return None
         return data if isinstance(data, (dict, list)) else {}
 
     def _drain(self) -> None:
@@ -190,13 +214,23 @@ class _Handler(BaseHTTPRequestHandler):
         one endpoint meant to be reached from elsewhere is POST /api/events,
         which authenticates with its own bearer token instead."""
         port = getattr(self.server, "server_port", 0)  # the port actually bound, not the configured one
-        if _host_is_loopback(self.headers.get("Host"), port) and _origin_is_local(self.headers.get("Origin"), port):
+        # A reverse proxy or tunnel rewrites Host to 127.0.0.1 and curl sends no
+        # Origin, so a forwarded request would pass as local: it gets only the webhook.
+        forwarded = any(self.headers.get(h) for h in FORWARDED_HEADERS)
+        if (not forwarded and _host_is_loopback(self.headers.get("Host"), port)
+                and _origin_is_local(self.headers.get("Origin"), port)):
             return True
         if urlparse(self.path).path == "/api/events" and self._webhook_token_ok():
             return True
         self._drain()
         self._json(403, {"error": "forbidden origin"})
         return False
+
+    def _from_dashboard(self) -> bool:
+        """A browser on the dashboard's own origin (browsers always send Origin on POST)."""
+        port = getattr(self.server, "server_port", 0)
+        return (bool(self.headers.get("Origin")) and not any(self.headers.get(h) for h in FORWARDED_HEADERS)
+                and _host_is_loopback(self.headers.get("Host"), port) and _origin_is_local(self.headers.get("Origin"), port))
 
     def _webhook_token_ok(self) -> bool:
         token = self.engine.config.settings.get("webhook_token")
@@ -212,7 +246,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         body = file.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(str(file))[0] or "application/octet-stream")
+        self.send_header("Content-Type", CONTENT_TYPES.get(file.suffix.lower(), "application/octet-stream"))
         self.send_header("Content-Length", str(len(body)))
         # no-store, not no-cache: these files are a few kilobytes over loopback,
         # and "no-cache" without a validator still leaves browsers serving the old
@@ -223,6 +257,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     # --- routing -------------------------------------------------------------
     def do_GET(self):
+        try:
+            self._get()
+        except Exception as ex:  # a broken hooks file must not reset the connection and blank the dashboard
+            print(f"api: GET {self.path} failed: {type(ex).__name__}: {ex}", flush=True)
+            try:
+                self._json(500, {"error": "internal error"})
+            except OSError:
+                pass
+
+    def _get(self) -> None:
         path = urlparse(self.path).path
         if not self._guard():
             return
@@ -309,7 +353,9 @@ class _Handler(BaseHTTPRequestHandler):
                 case ("POST", "api", "adapters", adapter, action):
                     return self._adapter_action(adapter, action, body)
                 case ("PUT", "api", "rules"):
-                    e.config.set_rules([Rule.from_dict(r) for r in raw] if isinstance(raw, list) else [])
+                    if not isinstance(raw, list):
+                        raise ValueError("expected a list of rules")
+                    e.config.set_rules([Rule.from_dict(r) for r in raw])
                     e.reapply()
                     return self._json(200, [r.to_dict() for r in e.config.rules])
                 case ("POST", "api", "rules"):
@@ -358,7 +404,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json(200, e.set_integration_options(integ_id, body))
                 case ("POST", "api", "update"):
                     from lumen.app import update
-                    return self._json(200, {"message": update.apply(self.engine.request_exit, e.config.settings.get("port", 6733))})
+                    return self._json(200, {"message": update.apply(self.engine.request_exit, getattr(self.server, "server_port", 6733))})
                 case ("POST", "api", "onboarded"):
                     e.config.set_onboarded(True)
                     return self._json(200, {"onboarded": True})
@@ -395,7 +441,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _webhook(self, body: dict) -> None:
         token = self.engine.config.settings.get("webhook_token")
-        if token and not self._webhook_token_ok():
+        if token and not self._webhook_token_ok() and not self._from_dashboard():  # Test buttons send no token
             return self._json(401, {"error": "bad token"})
         type_ = str(body.get("type") or "").strip()
         if not type_ or len(type_) > 80:

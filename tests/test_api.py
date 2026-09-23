@@ -3,6 +3,7 @@
 The `server` fixture (engine + HTTP server + fake devices) lives in conftest.py.
 """
 
+import urllib.error
 import urllib.request
 
 
@@ -93,3 +94,59 @@ def test_autostart_reports_the_os_not_the_stored_preference(server, monkeypatch)
     status, body = call("PUT", "/api/settings", {"autostart": True})
     assert status == 500 and "start at login" in body["error"]
     assert call("GET", "/api/state")[1]["settings"]["autostart"] is False
+
+
+def _raw(call, method, path, data=b"", headers=None):
+    req = urllib.request.Request(call.base + path, method=method, data=data,
+                                 headers={"Content-Type": "application/json", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_bad_bodies_are_refused_not_read_as_empty(server):
+    """An invalid body used to parse as {}: PUT /api/rules then wiped every rule,
+    and a 1e999 in an event made /api/state unparseable for the dashboard."""
+    call, engine, *_ = server
+    before = call("GET", "/api/rules")[1]
+    assert _raw(call, "PUT", "/api/rules", b"{not json") == 400
+    assert _raw(call, "PUT", "/api/rules", b'{"id": "x"}') == 400
+    assert call("GET", "/api/rules")[1] == before
+    assert _raw(call, "POST", "/api/events", b'{"type": "x", "data": {"n": 1e999}}') == 400
+    assert _raw(call, "POST", "/api/events", b'{"type": "x", "data": {"n": NaN}}') == 400
+    assert call("GET", "/api/state")[0] == 200
+
+
+def test_forwarded_requests_only_reach_the_webhook(server):
+    """Behind a reverse proxy Host reads 127.0.0.1 and there is no Origin."""
+    call, engine, *_ = server
+    assert _raw(call, "POST", "/api/pause", b'{"paused": true}', {"X-Forwarded-For": "203.0.113.9"}) == 403
+    assert not engine.paused
+
+
+def test_dashboard_test_buttons_work_with_a_webhook_token(server):
+    call, engine, *_ = server
+    call("PUT", "/api/settings", {"webhook_token": "s3cret"})
+    port = call.base.rsplit(":", 1)[1]
+    assert _raw(call, "POST", "/api/events", b'{"type": "x"}', {"Origin": f"http://127.0.0.1:{port}"}) == 200
+    assert _raw(call, "POST", "/api/events", b'{"type": "x"}', {"Origin": "http://localhost"}) == 403  # port 80 is not us
+
+
+def test_settings_patch_is_all_or_nothing(server):
+    call, engine, *_ = server
+    assert call("PUT", "/api/settings", {"notch": False, "port": 99999})[0] == 400
+    assert call("GET", "/api/state")[1]["settings"]["notch"] is True
+
+
+def test_paused_with_keep_lit_holds_the_colour_and_catches_up_on_resume(server):
+    call, engine, light, toast = server
+    call("PUT", "/api/settings", {"keep_lit": True})
+    call("POST", "/api/events", {"type": "agents.status", "data": {"status": "input"}})
+    held = light.colors[-1]
+    call("POST", "/api/pause", {"paused": True})
+    call("POST", "/api/events", {"type": "agents.status", "data": {"status": "done"}})
+    assert light.colors[-1] == held  # paused: not reacting
+    call("POST", "/api/pause", {"paused": False})
+    assert light.colors[-1] != held  # resumed: shows what changed meanwhile

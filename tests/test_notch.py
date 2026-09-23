@@ -7,9 +7,10 @@ def test_notch_shows_only_requested_account_windows():
     assert clean_usage(dict.fromkeys(("claude", "codex", "gemini"), summary)) == {
         "claude": {"five_hour": block, "seven_day": block},
         "codex": {"seven_day": block},
-        "gemini": {"five_hour": block, "seven_day": block},
+        "gemini": {"five_hour": block, "daily": block, "seven_day": block},
     }
-    assert clean_usage({"gemini": {"daily": block, "gemini_pro": block}}) == {"gemini": {}}
+    # Antigravity's own file reports a daily window: that is its meter. Per-model rows stay out.
+    assert clean_usage({"gemini": {"daily": block, "gemini_pro": block}}) == {"gemini": {"daily": block}}
     assert clean_usage({"five_hour": block}) == {"claude": {"five_hour": block}}
 
 

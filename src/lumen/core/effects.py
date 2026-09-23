@@ -105,9 +105,10 @@ def zones_of(base, n: int) -> list[RGB]:
 def agent_sessions(sessions: list[dict], agent: str) -> list[dict]:
     """The sessions one action looks at. Filtering by agent re-ranks them, so a
     keyboard showing only Claude has no holes where Codex sessions sit."""
+    sessions = [s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else []  # event data is untrusted
     if not agent:
-        return list(sessions)
-    mine = sorted((s for s in sessions if s.get("agent") == agent), key=lambda s: int(s.get("slot", 0)))
+        return sessions
+    mine = sorted((s for s in sessions if s.get("agent") == agent), key=lambda s: int(s.get("slot", 0) or 0))
     return [{**s, "slot": i} for i, s in enumerate(mine)]
 
 
@@ -232,6 +233,8 @@ class EffectPlayer:
 
     def run(self, action: Action, event: Event | None = None) -> list[str]:
         """Apply one action. Returns the ids of the devices it touched."""
+        if self.paused.is_set() and not (event and event.type == "test"):
+            return []  # paused means stop reacting; the engine replays base colours on resume
         touched = []
         for device in self.targets(action):
             try:
@@ -452,7 +455,7 @@ def _notification_text(action: Action, event: Event | None) -> tuple[str, str]:
     body = action.message or label
     try:
         body = body.format_map(_Safe(data))
-    except (ValueError, IndexError):
+    except Exception:  # "{agent.name}" raises AttributeError: a typo in a message is not a dead device
         pass
     agent = data.get("agent")
     title = f"Lumen · {str(agent).title()}" if agent else "Lumen"

@@ -83,9 +83,28 @@ def test_antigravity_status_survives_reconciliation(tmp_path, db_status, expecte
         conn.execute("CREATE TABLE steps (idx INT, step_type INT, status INT)")
         conn.execute("INSERT INTO steps VALUES (1, 0, ?)", (db_status,))
     conn.close()
+    quiet = time.time() - gemini.QUIET_S - 5  # the database has stopped changing
+    for f in conv.iterdir():
+        os.utime(f, (quiet, quiet))
     meta = {}
     truth = gemini.antigravity_states(home=tmp_path, metadata=meta)
     assert ag.session_statuses({}, truth, meta, meta) == {"c1": expected}
+
+
+def test_antigravity_finished_step_mid_turn_is_not_a_finished_turn(tmp_path):
+    """Between two steps the newest row is always "done"; while the database is
+    still being written that is a turn in progress, not hundreds of finishes."""
+    conv = tmp_path / "antigravity" / "conversations"
+    conv.mkdir(parents=True)
+    with sqlite3.connect(conv / "c1.db") as conn:
+        conn.execute("CREATE TABLE steps (idx INT, step_type INT, status INT)")
+        conn.execute("INSERT INTO steps VALUES (1, 0, 3)")
+    conn.close()
+    assert gemini.antigravity_states(home=tmp_path) == {"c1": True}
+    old = time.time() - gemini.FORGET_AFTER_S - 5
+    for f in conv.iterdir():
+        os.utime(f, (old, old))
+    assert gemini.antigravity_states(home=tmp_path) == {}  # long idle: no zone any more
 
 
 def _usage_line(tokens: int, pad: str = "") -> str:
@@ -134,7 +153,6 @@ def test_unchanged_usage_file_goes_stale(tmp_path, monkeypatch):
     old = time.time() - gu.STALE_S - 60
     os.utime(usage, (old, old))
     monkeypatch.setattr(gu, "usage_path", lambda: usage)
-    monkeypatch.setattr(gu, "credentials", lambda: {"access_token": "t"})
     monkeypatch.setattr(gu, "_latest", None)
     monkeypatch.setattr(gu, "_latest_at", 0.0)
     assert gu.refresh() is None and gu.refresh() is None  # rereading does not renew it

@@ -30,11 +30,9 @@ The hook side must stay stdlib-only and fast: it runs on every tool call.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -119,7 +117,7 @@ def apply_hook(payload: dict, state_dir: Path | None = None, now: float | None =
     status = HOOK_EVENTS[event]
     path = state_dir / f"{session_id}.json"
     if status is None:
-        path.unlink(missing_ok=True)
+        paths.unlink_quietly(path)
         return None
     if event == "SessionStart" and not path.exists():
         return None  # a tab that never sent a prompt takes no slot (helper/one-shot sessions never do)
@@ -404,12 +402,7 @@ def _write_json(path: Path, data: dict) -> None:
     if path.exists() and not backup.exists():
         shutil.copy2(path, backup)
     mode = path.stat().st_mode if path.exists() else None
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(data, indent=2) + "\n")
-    if mode is not None:  # mkstemp is 0600; keep whatever the user's file had
-        os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    paths.write_atomic(path, json.dumps(data, indent=2) + "\n", mode)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +422,7 @@ def read_sessions(state_dir: Path | None = None, now: float | None = None) -> di
         if not isinstance(data, dict) or data.get("status") not in PRIORITY:
             continue
         if now - data.get("ts", 0) >= STALE_AFTER_S:
-            path.unlink(missing_ok=True)  # hooks went silent hours ago: stop re-reading it every tick
+            paths.unlink_quietly(path)  # hooks went silent hours ago: stop re-reading it every tick
             continue
         out[path.stem] = data
     return out
@@ -450,7 +443,7 @@ def forget_session(session_id: str, state_dir: Path | None = None) -> bool:
     if session is not None:
         slots.remember(session_id, session.get("cwd", ""), dismissed_status=_dismissed[session_id])
     if path.is_file():
-        path.unlink(missing_ok=True)
+        paths.unlink_quietly(path)
         return True
     if session is None:
         return False
@@ -659,6 +652,7 @@ class AgentIntegration(Integration):
     hook_timeout = 5  # seconds, in Claude Code's and Codex's settings
     poll_interval_s = 0.5
     can_connect = True
+    prune_hooked = True  # truth() covers every hooked session, so one it omits has closed
 
     def __init__(self, emit: Callable[[Event], None], options: dict):
         super().__init__(emit, options)
@@ -689,7 +683,7 @@ class AgentIntegration(Integration):
             for s in self.sessions:
                 self._records[s["id"]] = {**s, **self._records.get(s["id"], {}), "tracking_health": "unavailable"}
         statuses = prune_gone(session_statuses(hooked, truth, self._records, getattr(self, "_fallback_records", {})),
-                              truth, self._records)
+                              truth if self.prune_hooked else {}, self._records)
         dismissal_updates: list[tuple[str, str, str | None]] = []
         with _latest_lock:
             for sid in list(_dismissed):
@@ -703,8 +697,9 @@ class AgentIntegration(Integration):
                     del _dismissed[sid]  # a completed task has begun a new turn
                     dismissal_updates.append((sid, cwd, None))
                 else:
-                    _dismissed[sid] = current
-                    dismissal_updates.append((sid, cwd, current))
+                    if current != previous:  # every poll would otherwise rewrite slots.json
+                        _dismissed[sid] = current
+                        dismissal_updates.append((sid, cwd, current))
                     del statuses[sid]
             # A daemon restart retains just this marker in slots.json. Load it
             # lazily so ordinary visible sessions never write extra state.
@@ -721,8 +716,14 @@ class AgentIntegration(Integration):
                         del statuses[sid]
         for sid, cwd, marker in dismissal_updates:
             slots.remember(sid, cwd, dismissed_status=marker)
-        for sid in set(hooked) - set(statuses):  # tab is gone: stop reading its file every tick
-            forget_session(sid)
+        # Tab is gone: stop reading its file every tick. Not forget_session():
+        # that is the user's "dismiss", and a closed tab is not one (it wrote a
+        # dismissal marker for every tab ever closed). Dismissed tabs keep their
+        # file - it holds their start time and transcript offset.
+        with _latest_lock:
+            dismissed = set(_dismissed)
+        for sid in set(hooked) - set(statuses) - dismissed:
+            paths.unlink_quietly(paths.sessions_dir() / f"{sid}.json")
         return statuses
 
     @property

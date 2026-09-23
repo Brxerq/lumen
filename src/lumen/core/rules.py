@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import fnmatch
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 from lumen.core.events import Event
 
@@ -57,9 +57,12 @@ class Action:
 
     @classmethod
     def from_dict(cls, d: dict) -> Action:
+        if not isinstance(d, dict):
+            raise ValueError("an action must be an object")
         a = cls()
+        names = {f.name for f in fields(cls)}  # never a method: {"to_dict": 1} would replace it
         for k, v in d.items():
-            if hasattr(a, k):
+            if k in names:
                 setattr(a, k, v)
         a.color = _color(a.color)
         a.duration = max(0.1, float(a.duration))
@@ -96,6 +99,8 @@ class Rule:
 
     @classmethod
     def from_dict(cls, d: dict) -> Rule:
+        if not isinstance(d, dict) or not isinstance(d.get("actions", []), list):
+            raise ValueError("a rule must be an object with a list of actions")
         return cls(
             id=str(d.get("id") or uuid.uuid4().hex[:8]),
             name=str(d.get("name", "")),

@@ -152,7 +152,7 @@ def discover(settings: dict | None = None) -> list:
     _instance.position = position if position in POSITIONS else "top"
     _instance.hide_fullscreen = bool((settings or {}).get("notch_hide_fullscreen", True))
     s = settings or {}
-    _instance.offset = max(-1, min(100, int(s.get("notch_offset", -1) or -1)))
+    _instance.offset = max(-1, min(100, int(s.get("notch_offset", -1))))
     size = str(s.get("notch_size") or "regular")
     _instance.size = size if size in SIZES else "regular"
     theme = str(s.get("notch_theme") or "liquid")
@@ -205,7 +205,8 @@ def clean_usage(usage) -> dict:
     for agent, summary in usage.items():
         summary = summary if isinstance(summary, dict) else {}
         windows = {"claude": ("five_hour", "seven_day"), "codex": ("seven_day",),
-                   "gemini": ("five_hour", "seven_day"), "google": ("five_hour", "seven_day")}.get(agent, ())
+                   # Antigravity reports a daily window; without it the Gemini meter was always empty.
+                   "gemini": ("five_hour", "daily", "seven_day"), "google": ("five_hour", "daily", "seven_day")}.get(agent, ())
         blocks = {k: summary[k] for k in windows if isinstance(summary.get(k), dict)
                   and isinstance(summary[k].get("used"), (int, float))}
         if windows:
@@ -217,6 +218,10 @@ USAGE_COLORS = {"claude": (226, 151, 113), "codex": (105, 167, 255),
                 "gemini": (181, 152, 255), "google": (181, 152, 255)}
 
 
+WINDOW_SHORT = {"five_hour": "5h", "daily": "24h", "seven_day": "7d"}
+WINDOW_LONG = {"five_hour": "5-hour", "daily": "Daily", "seven_day": "7-day"}
+
+
 def remaining(block: dict) -> float:
     return round(100 - max(0, min(100, float(block["used"]))), 2)
 
@@ -226,8 +231,8 @@ def remaining_label(block: dict) -> str:
 
 
 def bar_window(agent: str, summary: dict) -> str | None:
-    key = "seven_day" if agent == "codex" else "five_hour"
-    return key if key in summary else None
+    keys = ("seven_day",) if agent == "codex" else ("five_hour", "daily") if agent in ("gemini", "google") else ("five_hour",)
+    return next((k for k in keys if k in summary), None)
 
 
 def usage_layout(usage: dict, row_count: int, expanded=(), height: int = HEIGHT) -> list[tuple]:
@@ -304,7 +309,10 @@ def session_rows(sessions: list[dict], *, prioritize: bool = True) -> list[tuple
     out = []
     for s in rows:
         cost = s.get("cost_usd")
-        out.append((str(s.get("agent", "agent")),
+        agent = str(s.get("agent", "agent"))
+        if agent == "gemini" and s.get("cwd") == "Antigravity":
+            agent = "antigravity"  # an Antigravity conversation, not a Gemini CLI tab
+        out.append((agent,
                     str(s.get("label") or paths.basename(str(s.get("cwd") or "")) or s.get("title") or "~"),
                     str(s.get("status")), context_percent(s), str(s.get("activity") or ""),
                     float(cost) if isinstance(cost, (int, float)) else None))
@@ -530,7 +538,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
     if five is not None and not unfolded:  # only remaining percentage; window labels belong in the panel
         f = _font(11 * SS, bold=True)
         colour = usage_colour(int(five))
-        d.text((W - BAR_INSET * SS, height * SS // 2), remaining_label({"used": five}).removesuffix(" left"), font=f, fill=colour + (255,), anchor="rm")
+        d.text((W - BAR_INSET * SS, height * SS // 2), remaining_label({"used": five}), font=f, fill=colour + (255,), anchor="rm")
 
     if unfolded:
         meta_f = _font(12 * SS)
@@ -555,7 +563,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 d.ellipse((BAR_INSET * SS, cy - 4 * SS, BAR_INSET * SS + 8 * SS, cy + 4 * SS), fill=colour + (255,))
 
             # Agent badge pill
-            agent_tag = "Antigravity" if agent in ("gemini", "antigravity") else agent.capitalize()
+            agent_tag = "Antigravity" if agent == "antigravity" else agent.capitalize()
             if theme == "liquid":
                 tag_w = d.textlength(agent_tag, font=badge_f)
                 d.rounded_rectangle((BAR_INSET * SS + 14 * SS, cy - 8 * SS, BAR_INSET * SS + 24 * SS + tag_w, cy + 8 * SS),
@@ -609,7 +617,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                     d.text((right, cy), "−" if detail_height else "+" if bar_window(agent, summary) else "", font=meta_f, fill=MUTED + (255,), anchor="rm")
                     right -= 18 * SS
                     for k, block in reversed(list(summary.items())):
-                        text = ("5h" if k == "five_hour" else "7d") + f" · {remaining_label(block)}"
+                        text = (WINDOW_SHORT.get(k) or str(k)) + f" · {remaining_label(block)}"
                         tw = d.textlength(text, font=small)
                         d.rounded_rectangle((right - tw - 10 * SS, cy - 9 * SS, right, cy + 9 * SS),
                                             radius=4 * SS, fill=(35, 41, 52, 255))
@@ -628,7 +636,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                         d.rounded_rectangle((x, my, x + (x1 - x) * pct / 100, my + METER_H * SS),
                                             radius=SS, fill=USAGE_COLORS[agent] + (255,))
                     reset = resets_in(block.get("resets_at"), now)
-                    caption = ("5-hour" if k == "five_hour" else "7-day") + " · " + remaining_label(block)
+                    caption = (WINDOW_LONG.get(str(k)) or str(k)) + " · " + remaining_label(block)
                     d.text((x, my + 12 * SS), caption, font=small, fill=USAGE_COLORS[agent] + (255,))
                     d.text((x1, my + 12 * SS), f"Resets in {reset}" if reset else "Reset unavailable",
                            font=small, fill=MUTED + (255,), anchor="ra")
@@ -743,13 +751,14 @@ def focus_pid(pid: int) -> bool:
 def focus_session(session: dict) -> bool:
     """Click on a row: raise the terminal/editor that tab lives in. Works for Claude, and now for Antigravity/Gemini on Windows/macOS!"""
     agent = session.get("agent")
-    if agent in ("gemini", "antigravity", "google"):
+    if agent in ("gemini", "antigravity", "google") and session.get("cwd") == "Antigravity":
         if sys.platform == "win32":
             import ctypes
             user32 = ctypes.windll.user32
             title = str(session.get("title") or "")
             conv_id = str(session.get("id") or "")
-            found: list[int] = []
+            exact: list[int] = []
+            generic: list[int] = []
 
             @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
             def enum_proc(hwnd, _):
@@ -761,12 +770,15 @@ def focus_session(session: dict) -> bool:
                 buff = ctypes.create_unicode_buffer(length + 1)
                 user32.GetWindowTextW(hwnd, buff, length + 1)
                 w_title = buff.value
-                if "Antigravity" in w_title or (title and title in w_title) or (conv_id and conv_id[:8] in w_title):
-                    found.append(hwnd)
+                if (title and title in w_title) or (conv_id and conv_id[:8] in w_title):
+                    exact.append(hwnd)
                     return False
+                if "Antigravity" in w_title and not generic:
+                    generic.append(hwnd)
                 return True
 
             user32.EnumWindows(enum_proc, 0)
+            found = exact or generic
             if found:
                 hwnd = found[0]
                 user32.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -782,6 +794,20 @@ def focus_session(session: dict) -> bool:
     try:
         return focus_pid(pid)
     except Exception:
+        return False
+
+
+def forget_remote(port, session_id: str) -> bool:
+    """Dismiss a tab through the daemon. forget_session() here ran in this
+    child process, whose session table is empty: fallback tabs never cleared."""
+    import urllib.parse
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{int(port or 6733)}/api/sessions/{urllib.parse.quote(session_id)}",
+                                     method="DELETE")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return 200 <= r.status < 300
+    except (OSError, ValueError):
         return False
 
 
@@ -946,7 +972,7 @@ def run_child() -> int:
         opts = state["options"]
         idle = opts.get("idle_hide_min")
         if all(z == (0, 0, 0) for z in zones) or state["fullscreen"] or \
-                (not state["pinned"] and idle_hidden(state["sessions"], int(idle) if isinstance(idle, (int, float)) else 0)):
+                (not state["pinned"] and idle_hidden(visible_sessions(state["sessions"], opts), int(idle) if isinstance(idle, (int, float)) else 0)):
             hide()
             return
         if not refresh and state["image"] is not None:
@@ -1003,10 +1029,10 @@ def run_child() -> int:
                 import webbrowser
                 webbrowser.open(f"http://127.0.0.1:{port}/")
             else:
-                from lumen.integrations.agent_sessions import forget_session
                 for s in list(sessions):
                     if s.get("status") == "done":
-                        forget_session(str(s.get("id", "")))
+                        forget_remote(port, str(s.get("id", "")))
+                        state["sessions"] = [x for x in state["sessions"] if x.get("id") != s.get("id")]
                 draw()
             return
         opts = state["options"]
@@ -1123,7 +1149,8 @@ def run_child() -> int:
             # countdowns tick) while the payload stays identical: redraw on that too.
             idle = state["options"].get("idle_hide_min")
             clock = ([s.get("id") for s in visible_sessions(state["sessions"], state["options"])],
-                     idle_hidden(state["sessions"], int(idle) if isinstance(idle, (int, float)) else 0), int(now // 60))
+                     idle_hidden(visible_sessions(state["sessions"], state["options"]),
+                                 int(idle) if isinstance(idle, (int, float)) else 0), int(now // 60))
             if fs != state["fullscreen"] or clock != state.get("clock"):
                 state["fullscreen"], state["clock"] = fs, clock
                 draw()

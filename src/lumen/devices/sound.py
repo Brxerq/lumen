@@ -19,10 +19,12 @@ API to exist.
 from __future__ import annotations
 
 import math
+import os
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import wave
 from pathlib import Path
@@ -111,13 +113,23 @@ def _samples(parts: list[tuple], volume: float = 1.0) -> bytes:
 
 def write_wav(path: Path, parts: list[tuple], volume: float = 1.0) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")  # a half-written file must never be played
-    with wave.open(str(tmp), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(RATE)
-        w.writeframes(_samples(parts, volume))
-    tmp.replace(path)
+    # A half-written file must never be played, and two plays of one tone at
+    # once must not share a temp file: each gets its own.
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-", suffix=".tmp")
+    os.close(fd)
+    tmp = Path(name)
+    try:
+        with wave.open(str(tmp), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(RATE)
+            w.writeframes(_samples(parts, volume))
+        try:
+            tmp.replace(path)
+        except PermissionError:
+            pass  # Windows: the other play has it open, and wrote the same bytes
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
 
 

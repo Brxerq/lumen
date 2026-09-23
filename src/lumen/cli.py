@@ -114,9 +114,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _endpoint() -> tuple[int, str]:
+    from lumen import paths
     from lumen.core.config import Config
     settings = Config().settings
-    return int(settings["port"]), str(settings.get("webhook_token", ""))
+    try:  # where the running daemon actually listens, if it had to move off the configured port
+        port = int((paths.data_dir() / "daemon.port").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        port = int(settings["port"])
+    return port, str(settings.get("webhook_token", ""))
 
 
 def _selfcheck() -> int:

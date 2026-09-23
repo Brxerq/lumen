@@ -148,6 +148,23 @@ def run_tray(engine: Engine, port: int, stop: threading.Event, icon_ref: list | 
             colors = [c for d in engine.devices if (c := engine.player.current_color(d.id))]
             icon.icon = tray_image(colors)
             icon.title = "Lumen — paused" if engine.paused else f"Lumen — {len(engine.devices)} devices"
+            # Windows only re-reads the checkmarks when told to: pausing from the
+            # dashboard left "Paused" unticked, and clicking it then did the opposite.
+            state = (engine.paused, bool(engine.config.settings.get("notch", True)))
+            if state != getattr(refresh, "last", state):
+                icon.update_menu()
+            refresh.last = state  # type: ignore[attr-defined]
+            # A daemon that runs for days rotates here too, not only at startup.
+            try:
+                log = paths.log_file()
+                if log.stat().st_size > MAX_LOG_BYTES and getattr(sys.stdout, "name", "") == str(log):
+                    # Copy, then truncate the open handle: Windows will not
+                    # rename a file this process is still writing to.
+                    import shutil
+                    shutil.copyfile(log, log.with_name(log.name + ".1"))
+                    sys.stdout.truncate(0)
+            except OSError:
+                pass
             time.sleep(1.0)
 
     def toggle_notch(item):
@@ -188,6 +205,10 @@ def run_app(no_tray: bool = False, open_ui: bool | None = None) -> int:
             import ctypes
             ctypes.windll.user32.MessageBoxW(None, "Lumen is already running — see the tray icon.", "Lumen", 0x40)
         return 1
+    # Temp files 0.8.2 and earlier left behind whenever a Windows replace failed.
+    for pattern in (".slots-*.json", ".config-*.json"):
+        for stray in paths.data_dir().glob(pattern):
+            paths.unlink_quietly(stray)
 
     engine = Engine()
     port = int(engine.config.settings["port"])
@@ -196,6 +217,14 @@ def run_app(no_tray: bool = False, open_ui: bool | None = None) -> int:
     except OSError as e:
         print(f"lumen: cannot listen on 127.0.0.1:{port} ({e}); change `port` in settings", flush=True)
         return 1
+    if server.server_port != port:
+        # Someone else holds the configured port. Everything that talks to the
+        # dashboard — tray, notch, updater, `lumen emit` — must use where we
+        # actually landed, or it talks to that other program instead.
+        print(f"lumen: port {port} is taken; using {server.server_port}", flush=True)
+        port = server.server_port
+        engine.config.settings["port"] = port  # in memory only until a settings save
+    paths.write_atomic(paths.data_dir() / "daemon.port", str(port))
     engine.start()
     print(f"lumen {engine.state()['version']}: dashboard at http://127.0.0.1:{port}/  ·  data in {paths.data_dir()}", flush=True)
     first_run = not engine.config.data["onboarded"]

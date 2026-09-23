@@ -14,7 +14,45 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
+import time
 from pathlib import Path
+
+
+def write_atomic(path: Path, text: str, mode: int | None = None) -> None:
+    """Write `text` to `path` through a temp file and os.replace, so a reader
+    never sees half a file.
+
+    Windows refuses the replace with WinError 5 while any other handle has the
+    target open — another poller thread reading it, an antivirus scan. That
+    used to fail the whole poll and leave the temp file behind, one per
+    failure, hundreds of them. Retry briefly, and never leave the temp."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        if mode is not None:  # mkstemp is 0600; keep whatever the file had
+            os.chmod(tmp, mode)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def unlink_quietly(path: Path) -> None:
+    """Delete a file that may be open elsewhere. On Windows an open handle makes
+    unlink raise PermissionError; the caller's next tick tries again."""
+    try:
+        path.unlink(missing_ok=True)
+    except PermissionError:
+        pass
 
 
 def basename(path: str) -> str:

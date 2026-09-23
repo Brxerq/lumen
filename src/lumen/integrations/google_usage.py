@@ -1,5 +1,5 @@
-"""Google & Gemini subscription/quota usage — read from Gemini CLI, Antigravity,
-or Google AI Studio/Cloud credentials.
+"""Google & Gemini quota usage, read from the file Antigravity keeps locally
+(~/.gemini/antigravity/usage.json). There is no remote endpoint.
 
 Matches the same output shape as claude_usage and codex_usage:
     latest() -> {"five_hour": {"used": 15, "resets_at": 1788...},
@@ -10,20 +10,11 @@ Matches the same output shape as claude_usage and codex_usage:
 from __future__ import annotations
 
 import json
-import os
-import sys
 import threading
 import time
 from pathlib import Path
 
 from lumen.integrations.claude_usage import STALE_S, _when
-
-CREDENTIALS_PATHS = [
-    Path.home() / ".gemini" / "credentials.json",
-    Path.home() / ".gemini" / "antigravity" / "credentials.json",
-    Path.home() / ".config" / "gemini" / "credentials.json",
-    Path.home() / ".config" / "gcloud" / "application_default_credentials.json",
-]
 
 WINDOWS = {
     "five_hour": "five_hour",
@@ -97,69 +88,6 @@ def eta_full(now: float | None = None) -> float | None:
     return max(0.0, (100 - u1) / rate)
 
 
-def _win_antigravity_token() -> str | None:
-    if sys.platform != "win32":
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class CREDENTIAL(ctypes.Structure):
-            _fields_ = [
-                ("Flags", wintypes.DWORD),
-                ("Type", wintypes.DWORD),
-                ("TargetName", wintypes.LPWSTR),
-                ("Comment", wintypes.LPWSTR),
-                ("LastWritten", wintypes.FILETIME),
-                ("CredentialBlobSize", wintypes.DWORD),
-                ("CredentialBlob", ctypes.POINTER(ctypes.c_byte)),
-                ("Persist", wintypes.DWORD),
-                ("AttributeCount", wintypes.DWORD),
-                ("Attributes", ctypes.c_void_p),
-                ("TargetAlias", wintypes.LPWSTR),
-                ("UserName", wintypes.LPWSTR),
-            ]
-
-        cred_ptr = ctypes.POINTER(CREDENTIAL)()
-        advapi = ctypes.windll.advapi32
-        if advapi.CredReadW("gemini:antigravity", 1, 0, ctypes.byref(cred_ptr)):
-            c = cred_ptr.contents
-            raw = ctypes.string_at(c.CredentialBlob, c.CredentialBlobSize).decode("utf-8", errors="ignore")
-            advapi.CredFree(cred_ptr)
-            try:
-                j = json.loads(raw)
-                return str(j.get("token") or raw)
-            except Exception:
-                return raw
-    except Exception:
-        return None
-    return None
-
-
-def credentials() -> dict | None:
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if api_key:
-        return {"api_key": api_key}
-    win_token = _win_antigravity_token()
-    if win_token:
-        return {"access_token": win_token, "source": "antigravity"}
-    for p in CREDENTIALS_PATHS:
-        if not p.exists():
-            continue
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                token = data.get("access_token") or data.get("api_key") or data.get("token")
-                if token:
-                    return {"access_token": str(token)}
-        except (OSError, ValueError):
-            continue
-    antigravity_dir = Path.home() / ".gemini" / "antigravity"
-    if antigravity_dir.is_dir() and (antigravity_dir / "conversations").is_dir():
-        return {"access_token": "antigravity_local", "source": "antigravity"}
-    return None
-
-
 def usage_path() -> Path:
     return Path.home() / ".gemini" / "antigravity" / "usage.json"
 
@@ -200,42 +128,26 @@ def summarize(raw: dict, now: float | None = None) -> dict:
     return out
 
 
-def fetch(creds: dict, timeout: float = 10.0) -> dict | None:
-    """Fetch usage from Google / Gemini quota endpoint if available, or return local quota."""
-    return read_local_antigravity_usage()
-
-
 def refresh(now: float | None = None) -> dict | None:
+    """Antigravity writes its quota to a local file; that file is the only
+    source. (Earlier builds also read a secret from the credential store and
+    API keys from the environment, then used neither.)"""
+    global _detail, _latest, _latest_at
     now_ts = now if now else time.time()
-    creds = credentials()
-    if not creds:
+    data = read_local_antigravity_usage()
+    summary = summarize(data, now_ts) if data else {}
+    if data and summary:
+        observed = data.get("_observed_at")
+        observed = min(now_ts, float(observed)) if isinstance(observed, (int, float)) else now_ts
         with _lock:
-            global _detail
-            _detail = "no Google or Gemini credentials found"
+            if observed > _latest_at or summary != _latest:
+                _latest, _latest_at = summary, observed
+                if "five_hour" in summary:
+                    _record_sample(observed, summary["five_hour"]["used"])
+            _detail = "usage read from Antigravity"
         return latest(now_ts)
-
-    try:
-        remote = fetch(creds)
-    except Exception:
-        remote = None
-
-    data = remote or read_local_antigravity_usage()
-    if data:
-        summary = summarize(data, now_ts)
-        if summary:
-            observed = data.get("_observed_at")
-            observed = min(now_ts, float(observed)) if isinstance(observed, (int, float)) else now_ts
-            with _lock:
-                global _latest, _latest_at
-                if observed > _latest_at or summary != _latest:
-                    _latest, _latest_at = summary, observed
-                    if "five_hour" in summary:
-                        _record_sample(observed, summary["five_hour"]["used"])
-                _detail = "usage read from Google / Antigravity"
-            return latest(now_ts)
-
     with _lock:
-        _detail = "Google / Antigravity quota data unavailable"
+        _detail = "Antigravity quota data unavailable" if data else f"no quota file at {usage_path()}"
     return latest(now_ts)
 
 

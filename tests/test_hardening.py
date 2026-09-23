@@ -315,9 +315,10 @@ def test_transient_effects_force_a_full_repaint_when_they_end():
     """Direct-mode hardware forgets its colour, so the tracked "last write" is
     not proof of what is on screen once an effect finishes. The player drops
     that memory when a transient ends, and writes the base again."""
+    from conftest import Light
+
     from lumen.core.effects import EffectPlayer
     from lumen.core.rules import Action
-    from tests.conftest import Light
 
     light = Light()
     player = EffectPlayer()          # not started: this test drives the ticks
@@ -328,3 +329,19 @@ def test_transient_effects_force_a_full_repaint_when_they_end():
     player._tick(time.monotonic() + 1.0)          # the effect is over
     assert light.colors[-1] == (0, 40, 0)
     assert "light" not in player._last_write or player._last_write["light"] == ((0, 40, 0),)
+
+
+def test_write_atomic_waits_out_a_reader_and_leaves_no_temp(tmp_path):
+    """Windows refuses os.replace while another handle has the target open.
+    That failed a poll every time and leaked one temp file per failure."""
+    import threading
+
+    from lumen import paths
+
+    target = tmp_path / "slots.json"
+    target.write_text("{}", encoding="utf-8")
+    reader = open(target, encoding="utf-8")
+    threading.Timer(0.2, reader.close).start()
+    paths.write_atomic(target, '{"a": 1}')
+    assert target.read_text(encoding="utf-8") == '{"a": 1}'
+    assert [p.name for p in tmp_path.iterdir()] == ["slots.json"]

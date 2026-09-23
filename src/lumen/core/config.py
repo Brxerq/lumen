@@ -15,16 +15,14 @@ Reads tolerate a missing or broken file (you get defaults); writes are atomic.
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 import threading
 import uuid
 from collections.abc import Collection
 from pathlib import Path
 
 from lumen import paths
-from lumen.core.rules import Rule, default_rules
+from lumen.core.rules import Action, Rule, default_rules
 
 DEFAULT_SETTINGS = {
     "port": 6733,                 # dashboard + API, loopback only
@@ -101,6 +99,8 @@ def _settings(saved: dict) -> dict:
     current version cannot use (an old format, a hand-edited typo) falls back to
     the default rather than stopping the daemon from starting."""
     out = dict(DEFAULT_SETTINGS)
+    if "notch_show_google_usage" in saved:  # renamed in 0.8.0; keep the user's choice
+        saved.setdefault("notch_show_gemini_usage", saved["notch_show_google_usage"])
     for key, value in saved.items():
         if key not in DEFAULT_SETTINGS:
             continue
@@ -154,11 +154,7 @@ class Config:
 
     def save(self) -> None:
         with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".config-", suffix=".json")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2)
-            os.replace(tmp, self.path)
+            paths.write_atomic(self.path, json.dumps(self.data, indent=2))
 
     # --- accessors -------------------------------------------------------------
     @property
@@ -168,11 +164,11 @@ class Config:
     def update_settings(self, patch: dict) -> dict:
         """Apply a partial settings object. Raises ValueError on a value the
         daemon could not start with (the API turns that into a 400)."""
+        # Validate everything first: a bad value later in the patch must not
+        # leave the earlier ones live in memory while the API reports a 400.
+        coerced = {k: _coerce(k, v) for k, v in patch.items() if k in DEFAULT_SETTINGS}
         with self._lock:
-            for k, v in patch.items():
-                if k not in DEFAULT_SETTINGS:
-                    continue
-                self.settings[k] = _coerce(k, v)
+            self.settings.update(coerced)
             self.save()
             return dict(self.settings)
 
@@ -212,6 +208,9 @@ class Config:
         actions = preset.get("actions")
         if not name or not isinstance(actions, list) or not actions:
             raise ValueError("a preset needs a name and at least one action")
+        if not all(isinstance(a, dict) for a in actions):
+            raise ValueError("each preset action must be an object")
+        actions = [Action.from_dict(a).to_dict() for a in actions]  # the same shape and limits a rule gets
         saved = {"id": str(preset.get("id") or uuid.uuid4().hex[:8]), "name": name[:60], "actions": actions}
         with self._lock:
             rest = [p for p in self.data["presets"] if p["id"] != saved["id"]]

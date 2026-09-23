@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-09-23
+
+### Fixed
+- Windows: saving `slots.json`, `config.json` and hook settings no longer fails with `PermissionError [WinError 5]` while another thread or a virus scan has the file open, and a failed save no longer leaves a `.slots-*.json` temp file behind (existing ones are removed at startup). Deleting a session file that is still open is retried on the next poll instead of failing it.
+- `slots.json` is no longer rewritten twice a second for every dismissed tab, and is reread only when it changes.
+- Antigravity conversations no longer flap between running and finished on every tool call (hundreds of "Task finished" flashes a day): a turn ends only once its database has been quiet for 15 s, and activity is read from the WAL file. Conversations idle for an hour leave their zone instead of holding one for good.
+- Finished Codex tasks and archived threads leave the keyboard instead of staying on a zone forever.
+- Gemini CLI tabs are no longer dropped two minutes into a long turn, and closing a tab no longer records it as dismissed.
+- Pause really stops reacting: events no longer drive devices or notifications while paused, rescans no longer grab released hardware, and resuming shows what changed in the meantime.
+- A switched-off device goes dark instead of keeping its last colour, and shows the current status again when switched back on.
+- Editing a rule restores the colour of the most recent event, not whichever rule is listed last.
+- The self-updater test-launches the new binary first and stops with a clear message when Windows (Smart App Control or another application-control policy) blocks it. It keeps the previous binary before swapping, restores it if the new version never answers, gives up on a locked file after a minute instead of looping forever, and refuses a second update while one is running.
+- Gemini / Antigravity limits show their daily window in the status tab; `gemini.usage` is sent once (not also as `google.usage`) and is in the rule builder, as are the per-tab `agent.session.*` events and Gemini as an agent. The old `notch_show_google_usage` setting carries over.
+- Google usage no longer reads a secret from the Windows Credential Manager or API keys from the environment; it never used them.
+- The dashboard's Test buttons work when a webhook token is set. A bad JSON body (or `NaN` / `1e999`) is refused with 400 instead of being read as empty, so `PUT /api/rules` can no longer wipe every rule and one event can no longer break the dashboard. A settings change with one invalid value no longer half-applies.
+- Requests forwarded by a reverse proxy or tunnel can only reach `/api/events`; an Origin on port 80 no longer counts as the dashboard. A device name can no longer inject markup into the dashboard.
+- If the configured port is taken, the tray, status tab, updater and `lumen emit` use the port Lumen actually bound.
+- The status tab: "Clear done" goes through the daemon, idle-hide follows only the agents it shows, `notch_offset` 0 is honoured, Gemini CLI tabs are labelled Gemini (not Antigravity), and the folded percentage says "left".
+- The tray's checkmarks follow changes made in the dashboard, and the log rotates while Lumen runs, not only at startup.
+- "Start at login" is shown on only when login starts this copy of Lumen.
+- Forgetting the Hue entry under disconnected devices no longer deletes the Hue pairing; saved presets are validated like rules.
+- GitHub: cancelled and skipped runs are no longer reported as failures, and one repository's error is not hidden by another's success.
+- The bash command-timer snippet fires again; Codex and Claude pins for the same project match; OpenRGB is not relaunched on every rescan; the renewed Claude login is saved with retries.
+- Reinstalling with `install.ps1` restarts Lumen if it was running.
+
+### Changed
+- Releases fail early unless the tag, `__version__` and the plugin manifest agree.
+
 ## [0.8.2] — 2026-09-14
 
 ### Fixed
