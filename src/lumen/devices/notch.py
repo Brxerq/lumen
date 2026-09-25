@@ -480,7 +480,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
     t = {**THEME_BASE, **THEMES.get(theme, THEMES["dynamic"])}
     shell_fill, edge_stroke = t["shell"], t["edge"]
     corner_r = t["radius"][1 if unfolded else 0] * SS
-    ink, muted, chip, track = t["ink"], t["muted"], t["chip"], t["track"]
+    ink, muted, chip, track = (cast(RGB, t[k]) for k in ("ink", "muted", "chip", "track"))
     mono = t["mono"]
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -880,7 +880,7 @@ def self_check() -> bool:
         ok = ok and c.size[0] == PANEL_WIDTH and c.size[1] > b.size[1]
         # translucent buttons must blend onto the shell, not punch see-through holes in it
         c = render(zones, rows, DEFAULT_PALETTE, None, fills, usage, unfolded=True, theme=theme)
-        ok = ok and c.getpixel((PANEL_WIDTH // 4 + 30, c.height - PANEL_PAD - 6))[3] == 255
+        ok = ok and cast(tuple, c.getpixel((PANEL_WIDTH // 4 + 30, c.height - PANEL_PAD - 6)))[3] == 255
     return ok
 
 
