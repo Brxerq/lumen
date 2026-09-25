@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-09-25
+
+### Added
+- Three new status tab themes that look clearly different from the dark ones: **Paper** (light), **Terminal** (green phosphor, monospaced) and **Aurora** (purple-to-teal gradient).
+
+### Fixed
+- The unfolded status tab no longer shows the desktop through its buttons, badges, rim and context bars on Windows, and their text no longer has jagged white edges: translucent fills are now blended onto the tab instead of replacing its pixels.
+- The Dashboard / Clear done buttons no longer show an empty box where the ⚡ / ✕ icons were meant to be.
+
 ## [0.8.3] — 2026-09-23
 
 ### Fixed

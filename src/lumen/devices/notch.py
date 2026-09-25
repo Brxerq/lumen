@@ -71,6 +71,22 @@ SIZES = {"thin": (16, 4, 200), "regular": (HEIGHT, BAR_H, WIDTH), "thick": (34, 
 SHOW_DEFAULTS = {"sessions": True, "context": True, "cost": True, "activity": True,
                  "claude_usage": True, "codex_usage": True, "gemini_usage": True, "accent": True, "usage_follows_tabs": False}
 PULSE_S = 1.6                # a tab that just started waiting on you breathes this long
+# Visual themes: shell colour (shell2 = gradient end), rim, corner radius (folded, unfolded),
+# text colours, chip / meter-track fills and whether text is monospaced.
+THEME_BASE = {"shell2": None, "ink": INK, "muted": MUTED, "chip": (35, 41, 52), "track": (39, 45, 55), "mono": False}
+THEMES: dict[str, dict] = {
+    "liquid": {"shell": (8, 10, 15), "edge": (190, 215, 255, 45), "radius": (24, 32)},
+    "dynamic": {"shell": SHELL, "edge": EDGE, "radius": (RADIUS, RADIUS)},
+    "rog": {"shell": (8, 10, 14), "edge": (0, 240, 255, 65), "radius": (4, 4)},
+    "minimal": {"shell": (15, 16, 20), "edge": (255, 255, 255, 12), "radius": (8, 8)},
+    "studio": {"shell": (24, 25, 30), "edge": (255, 255, 255, 36), "radius": (14, 14)},
+    "paper": {"shell": (246, 244, 239), "edge": (0, 0, 0, 30), "radius": (16, 20), "ink": (30, 30, 34),
+              "muted": (110, 108, 104), "chip": (228, 225, 218), "track": (222, 219, 212)},
+    "terminal": {"shell": (4, 9, 5), "edge": (60, 255, 120, 90), "radius": (2, 2), "ink": (150, 255, 170),
+                 "muted": (70, 160, 95), "chip": (10, 30, 15), "track": (14, 36, 19), "mono": True},
+    "aurora": {"shell": (22, 12, 48), "shell2": (4, 48, 56), "edge": (170, 140, 255, 80), "radius": (18, 24),
+               "ink": (240, 236, 255), "muted": (160, 170, 200), "chip": (40, 34, 80), "track": (36, 40, 72)},
+}
 
 
 def _get_lanczos_filter() -> int:
@@ -109,7 +125,7 @@ class Notch(ScreenGlow):
         self.port = 6733                  # the dashboard, so a drag can save its new place
         self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
         self.agents = "all"               # whose sessions: all | claude | codex | gemini
-        self.theme = "liquid"             # liquid | dynamic | minimal | rog | studio
+        self.theme = "liquid"             # one of THEMES
 
     def child_command(self) -> list[str]:
         return child_command()
@@ -156,7 +172,7 @@ def discover(settings: dict | None = None) -> list:
     size = str(s.get("notch_size") or "regular")
     _instance.size = size if size in SIZES else "regular"
     theme = str(s.get("notch_theme") or "liquid")
-    _instance.theme = theme if theme in ("liquid", "dynamic", "minimal", "rog", "studio") else "liquid"
+    _instance.theme = theme if theme in THEMES else "liquid"
     _instance.opacity = max(30, min(100, int(s.get("notch_opacity", 96) or 96)))
     _instance.port = int(s.get("port", 6733) or 6733)
     _instance.idle_hide_min = max(0, int(s.get("notch_idle_hide_min", 0) or 0))
@@ -394,9 +410,13 @@ def panel_row_at(y: int, n_rows: int, height: int = HEIGHT) -> int | None:
 
 
 @functools.lru_cache(maxsize=16)
-def _font(size: int, bold: bool = False):
+def _font(size: int, bold: bool = False, mono: bool = False):
     from PIL import ImageFont
     candidates = {
+        "win32": ["C:/Windows/Fonts/consolab.ttf" if bold else "C:/Windows/Fonts/consola.ttf"],
+        "darwin": ["/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf"],
+    }.get(sys.platform, ["/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf" if bold else
+                         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]) if mono else {
         "win32": [("C:/Windows/Fonts/seguisb.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf")],
         "darwin": ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc",
                    "/System/Library/Fonts/Supplemental/Arial.ttf"],
@@ -457,41 +477,34 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
         h = content_end + 7 + BTN_H + PANEL_PAD
     W, H = w * SS, h * SS
 
-    # Theme aesthetics: shell fill, stroke edge, and corner radius
-    if theme == "liquid":
-        shell_fill = (8, 10, 15)
-        edge_stroke = (190, 215, 255, 45)  # Liquid mercury rim
-        corner_r = (24 if not unfolded else 32) * SS
-    elif theme == "rog":
-        shell_fill = (8, 10, 14)
-        edge_stroke = (0, 240, 255, 65)  # Cyber neon cyan edge
-        corner_r = 4 * SS
-    elif theme == "minimal":
-        shell_fill = (15, 16, 20)
-        edge_stroke = (255, 255, 255, 12)
-        corner_r = 8 * SS
-    elif theme == "studio":
-        shell_fill = (24, 25, 30)
-        edge_stroke = (255, 255, 255, 36)
-        corner_r = 14 * SS
-    else:  # dynamic
-        shell_fill = SHELL
-        edge_stroke = EDGE
-        corner_r = RADIUS * SS
+    t = {**THEME_BASE, **THEMES.get(theme, THEMES["dynamic"])}
+    shell_fill, edge_stroke = t["shell"], t["edge"]
+    corner_r = t["radius"][1 if unfolded else 0] * SS
+    ink, muted, chip, track = t["ink"], t["muted"], t["chip"], t["track"]
+    mono = t["mono"]
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
     # shell: flat on the screen-edge side, rounded on the other — it hangs from the edge
     if rounded:
-        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=corner_r, fill=shell_fill + (255,))
-        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 - SS), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
+        box, rim = (0, 0, W - 1, H - 1), (SS, SS, W - 1 - SS, H - 1 - SS)
     elif flip:
-        d.rounded_rectangle((0, 0, W - 1, H - 1 + corner_r), radius=corner_r, fill=shell_fill + (255,))
-        d.rounded_rectangle((SS, SS, W - 1 - SS, H - 1 + corner_r), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
+        box, rim = (0, 0, W - 1, H - 1 + corner_r), (SS, SS, W - 1 - SS, H - 1 + corner_r)
     else:
-        d.rounded_rectangle((0, -corner_r, W - 1, H - 1), radius=corner_r, fill=shell_fill + (255,))
-        d.rounded_rectangle((SS, -corner_r, W - 1 - SS, H - 1 - SS), radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
+        box, rim = (0, -corner_r, W - 1, H - 1), (SS, -corner_r, W - 1 - SS, H - 1 - SS)
+    d.rounded_rectangle(box, radius=corner_r, fill=shell_fill + (255,))
+    if t["shell2"]:  # a left-to-right gradient shell, kept inside the shape's own alpha
+        grad = Image.linear_gradient("L").transpose(Image.Transpose.ROTATE_90).resize((W, H))
+        col = Image.composite(Image.new("RGBA", (W, H), t["shell2"] + (255,)), Image.new("RGBA", (W, H), shell_fill + (255,)), grad)
+        col.putalpha(img.getchannel("A"))
+        img = col
+    # Everything on top goes on its own layer and is alpha-composited once: ImageDraw
+    # replaces RGBA pixels instead of blending, so a translucent fill drawn straight on
+    # the shell punched a near-key hole the Windows colour key then showed the desktop through.
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    d.rounded_rectangle(rim, radius=max(SS, corner_r - SS), outline=edge_stroke, width=SS)
 
     # Specular liquid glass highlights for liquid theme
     if theme == "liquid":
@@ -517,7 +530,6 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                                  fill=colour + (int(min(255, 150 * glow_gain)),))
             x = x1 + gap
         img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(4 * SS)))
-        d = ImageDraw.Draw(img)
         x = BAR_INSET * SS
         for i, (colour, n) in enumerate(bars):
             x1 = x + unit * n
@@ -536,22 +548,22 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
             x = x1 + gap
 
     if five is not None and not unfolded:  # only remaining percentage; window labels belong in the panel
-        f = _font(11 * SS, bold=True)
+        f = _font(11 * SS, bold=True, mono=mono)
         colour = usage_colour(int(five))
         d.text((W - BAR_INSET * SS, height * SS // 2), remaining_label({"used": five}), font=f, fill=colour + (255,), anchor="rm")
 
     if unfolded:
-        meta_f = _font(12 * SS)
-        badge_f = _font(10 * SS, bold=True)
-        d.line((BAR_INSET * SS, height * SS + 2 * SS, W - BAR_INSET * SS, height * SS + 2 * SS), fill=EDGE, width=SS)
+        meta_f = _font(12 * SS, mono=mono)
+        badge_f = _font(10 * SS, bold=True, mono=mono)
+        d.line((BAR_INSET * SS, height * SS + 2 * SS, W - BAR_INSET * SS, height * SS + 2 * SS), fill=edge_stroke, width=SS)
         y = (height + PANEL_PAD) * SS
         if not rows and not meters:
-            d.text((W // 2, y + ROW * SS // 2), "No open agent tabs", font=meta_f, fill=MUTED + (255,), anchor="mm")
+            d.text((W // 2, y + ROW * SS // 2), "No open agent tabs", font=meta_f, fill=muted + (255,), anchor="mm")
         for row in rows:
             agent, folder, status, pct = row[:4]
             activity = row[4] if len(row) > 4 else ""
             cost = row[5] if len(row) > 5 else None
-            colour = tuple(palette.get(status, MUTED[:3]))
+            colour = tuple(palette.get(status, muted))
             accent = AGENT_ACCENT.get(agent, (140, 143, 154))
             cy = y + ROW * SS // 2
             # Status indicator
@@ -570,7 +582,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                                     radius=7 * SS, fill=accent + (45,), outline=(190, 215, 255, 80), width=SS)
                 d.line((BAR_INSET * SS + 17 * SS, cy - 6 * SS, BAR_INSET * SS + 21 * SS + tag_w, cy - 6 * SS),
                        fill=(255, 255, 255, 90), width=SS)
-                d.text((BAR_INSET * SS + 19 * SS, cy), agent_tag, font=badge_f, fill=INK + (255,), anchor="lm")
+                d.text((BAR_INSET * SS + 19 * SS, cy), agent_tag, font=badge_f, fill=ink + (255,), anchor="lm")
                 nx = tag_w + 10 * SS
             elif theme == "rog":
                 agent_tag = f"[{agent_tag.upper()}]"
@@ -579,7 +591,8 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                             fill=(0, 0, 0, 160), outline=accent + (200,), width=SS)
                 d.text((BAR_INSET * SS + 18 * SS, cy), agent_tag, font=badge_f, fill=accent + (255,), anchor="lm")
                 nx = tag_w + 8 * SS
-            elif theme == "minimal":
+            elif theme in ("minimal", "terminal"):
+                agent_tag = agent + ">" if theme == "terminal" else agent_tag
                 tag_w = d.textlength(agent_tag, font=badge_f)
                 d.text((BAR_INSET * SS + 14 * SS, cy), agent_tag, font=badge_f, fill=accent + (255,), anchor="lm")
                 nx = tag_w
@@ -587,7 +600,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                 tag_w = d.textlength(agent_tag, font=badge_f)
                 d.rounded_rectangle((BAR_INSET * SS + 14 * SS, cy - 8 * SS, BAR_INSET * SS + 22 * SS + tag_w, cy + 8 * SS),
                                     radius=4 * SS, fill=accent + (40,), outline=accent + (95,), width=SS)
-                d.text((BAR_INSET * SS + 18 * SS, cy), agent_tag, font=badge_f, fill=INK + (255,), anchor="lm")
+                d.text((BAR_INSET * SS + 18 * SS, cy), agent_tag, font=badge_f, fill=ink + (255,), anchor="lm")
                 nx = tag_w + 8 * SS
 
             label = cast(str, LABELS.get(status, status))
@@ -595,42 +608,42 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
             right = W - BAR_INSET * SS - d.textlength(label, font=meta_f) - 12 * SS
             meta = "  ·  ".join(x for x in ((f"${cost:.2f}" if cost else ""), (f"{pct}%" if pct is not None else "")) if x)
             if meta:  # cost and context window, e.g. "$1.20  ·  63%", left of the state
-                d.text((right, cy), meta, font=meta_f, fill=MUTED + (255,), anchor="rm")
+                d.text((right, cy), meta, font=meta_f, fill=muted + (255,), anchor="rm")
                 right -= d.textlength(meta, font=meta_f) + 12 * SS
             # name, then what the tab is doing right now; clipped to the room that is left
             text = folder + (f"  ·  {activity}" if activity and status == "running" else "")
             x0 = BAR_INSET * SS + 22 * SS + nx + 8 * SS
             while text and d.textlength(text, font=meta_f) > right - x0:
                 text = text[:-2].rstrip() + "…" if len(text) > 2 else ""
-            d.text((x0, cy), text, font=meta_f, fill=MUTED + (255,), anchor="lm")
+            d.text((x0, cy), text, font=meta_f, fill=muted + (255,), anchor="lm")
             y += ROW * SS
         if meters:
-            small = _font(11 * SS)
+            small = _font(11 * SS, mono=mono)
             for agent, summary, top_y, detail_height in meters:
                 y = top_y * SS
                 cy = y + ROW * SS // 2
                 name = "Antigravity" if agent in ("gemini", "google") else agent.capitalize()
                 d.line((BAR_INSET * SS, y, W - BAR_INSET * SS, y), fill=edge_stroke, width=SS)
-                d.text((BAR_INSET * SS, cy), name, font=meta_f, fill=INK + (255,), anchor="lm")
+                d.text((BAR_INSET * SS, cy), name, font=meta_f, fill=ink + (255,), anchor="lm")
                 right = W - BAR_INSET * SS
                 if summary:
-                    d.text((right, cy), "−" if detail_height else "+" if bar_window(agent, summary) else "", font=meta_f, fill=MUTED + (255,), anchor="rm")
+                    d.text((right, cy), "−" if detail_height else "+" if bar_window(agent, summary) else "", font=meta_f, fill=muted + (255,), anchor="rm")
                     right -= 18 * SS
                     for k, block in reversed(list(summary.items())):
                         text = (WINDOW_SHORT.get(k) or str(k)) + f" · {remaining_label(block)}"
                         tw = d.textlength(text, font=small)
                         d.rounded_rectangle((right - tw - 10 * SS, cy - 9 * SS, right, cy + 9 * SS),
-                                            radius=4 * SS, fill=(35, 41, 52, 255))
+                                            radius=4 * SS, fill=chip + (255,))
                         d.text((right - 5 * SS, cy), text, font=small, fill=USAGE_COLORS[agent] + (255,), anchor="rm")
                         right -= tw + 16 * SS
                 else:
-                    d.text((right, cy), "Usage unavailable", font=small, fill=MUTED + (255,), anchor="rm")
+                    d.text((right, cy), "Usage unavailable", font=small, fill=muted + (255,), anchor="rm")
                 if detail_height:
                     k = bar_window(agent, summary)
                     block = summary[k]
                     x, x1 = BAR_INSET * SS, W - BAR_INSET * SS
                     my = y + (ROW + 2) * SS
-                    d.rounded_rectangle((x, my, x1, my + METER_H * SS), radius=SS, fill=(39, 45, 55, 255))
+                    d.rounded_rectangle((x, my, x1, my + METER_H * SS), radius=SS, fill=track + (255,))
                     pct = remaining(block)
                     if pct:
                         d.rounded_rectangle((x, my, x + (x1 - x) * pct / 100, my + METER_H * SS),
@@ -639,13 +652,15 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                     caption = (WINDOW_LONG.get(str(k)) or str(k)) + " · " + remaining_label(block)
                     d.text((x, my + 12 * SS), caption, font=small, fill=USAGE_COLORS[agent] + (255,))
                     d.text((x1, my + 12 * SS), f"Resets in {reset}" if reset else "Reset unavailable",
-                           font=small, fill=MUTED + (255,), anchor="ra")
+                           font=small, fill=muted + (255,), anchor="ra")
                 y = (top_y + ROW + detail_height) * SS
 
-        # Bottom quick action controls: [ ⚡ Dashboard ] [ ✕ Clear Done ]
+        # Bottom quick action controls. Plain words: the UI fonts have no ⚡ / ✕ glyph (they drew as boxes).
+        dash, clear = {"terminal": ("[ dashboard ]", "[ clear done ]"),
+                       "rog": ("DASHBOARD", "CLEAR DONE")}.get(theme, ("Dashboard", "Clear done"))
         d.line((BAR_INSET * SS, y + 2 * SS, W - BAR_INSET * SS, y + 2 * SS), fill=edge_stroke, width=SS)
         btn_y = y + 7 * SS
-        btn_f = _font(11 * SS, bold=True)
+        btn_f = _font(11 * SS, bold=True, mono=mono)
         btn_w = (W - 2 * BAR_INSET * SS - 10 * SS) // 2
         # Dashboard button
         b1_x0, b1_x1 = BAR_INSET * SS, BAR_INSET * SS + btn_w
@@ -655,26 +670,27 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
             d.rounded_rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), radius=btn_r,
                                  fill=(22, 26, 36, 220), outline=(190, 215, 255, 60), width=SS)
             d.line((b1_x0 + 8 * SS, btn_y + 2 * SS, b1_x1 - 8 * SS, btn_y + 2 * SS), fill=(255, 255, 255, 75), width=SS)
-            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ Dashboard", font=btn_f, fill=INK + (255,), anchor="mm")
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), dash, font=btn_f, fill=ink + (255,), anchor="mm")
 
             d.rounded_rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), radius=btn_r,
                                  fill=(22, 26, 36, 220), outline=(190, 215, 255, 60), width=SS)
             d.line((b2_x0 + 8 * SS, btn_y + 2 * SS, b2_x1 - 8 * SS, btn_y + 2 * SS), fill=(255, 255, 255, 75), width=SS)
-            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ Clear Done", font=btn_f, fill=MUTED + (255,), anchor="mm")
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), clear, font=btn_f, fill=muted + (255,), anchor="mm")
         elif theme == "rog":
             d.rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), fill=(0, 240, 255, 20), outline=(0, 240, 255, 90), width=SS)
-            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ DASHBOARD", font=btn_f, fill=(0, 240, 255, 255), anchor="mm")
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), dash, font=btn_f, fill=(0, 240, 255, 255), anchor="mm")
             d.rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), fill=(255, 0, 85, 20), outline=(255, 0, 85, 90), width=SS)
-            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ CLEAR DONE", font=btn_f, fill=(255, 120, 150, 255), anchor="mm")
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), clear, font=btn_f, fill=(255, 120, 150, 255), anchor="mm")
         else:
-            btn_r = 4 * SS if theme == "minimal" else 8 * SS if theme == "studio" else 6 * SS
+            btn_r = {"minimal": 4, "studio": 8, "terminal": 0, "paper": 11, "aurora": 11}.get(theme, 6) * SS
             d.rounded_rectangle((b1_x0, btn_y, b1_x1, btn_y + BTN_H * SS), radius=btn_r,
-                                 fill=(255, 255, 255, 14), outline=edge_stroke, width=SS)
-            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), "⚡ Dashboard", font=btn_f, fill=INK + (255,), anchor="mm")
+                                 fill=chip + (200,), outline=edge_stroke, width=SS)
+            d.text(((b1_x0 + b1_x1) // 2, btn_y + (BTN_H * SS) // 2), dash, font=btn_f, fill=ink + (255,), anchor="mm")
             d.rounded_rectangle((b2_x0, btn_y, b2_x1, btn_y + BTN_H * SS), radius=btn_r,
-                                 fill=(255, 255, 255, 14), outline=edge_stroke, width=SS)
-            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), "✕ Clear Done", font=btn_f, fill=MUTED + (255,), anchor="mm")
+                                 fill=chip + (200,), outline=edge_stroke, width=SS)
+            d.text(((b2_x0 + b2_x1) // 2, btn_y + (BTN_H * SS) // 2), clear, font=btn_f, fill=muted + (255,), anchor="mm")
 
+    img.alpha_composite(layer)
     img = img.resize((w, h), LANCZOS_FILTER)
     if opaque_key is not None:
         back = Image.new("RGBA", img.size, opaque_key + (255,))
@@ -858,10 +874,13 @@ def self_check() -> bool:
     a = render(zones, rows, DEFAULT_PALETTE, KEY, fills, usage)
     b = render(zones, rows, DEFAULT_PALETTE, None, fills, usage, unfolded=True, flip=True, glow_gain=1.5)
     ok = a.size == (WIDTH, HEIGHT) and b.size[0] == PANEL_WIDTH and b.size[1] > HEIGHT
-    for theme in ("liquid", "dynamic", "rog", "minimal", "studio"):
+    for theme in THEMES:
         c = render(zones, rows, DEFAULT_PALETTE, KEY, fills, usage, unfolded=True, theme=theme,
                    expanded_usage={"claude", "codex"})
         ok = ok and c.size[0] == PANEL_WIDTH and c.size[1] > b.size[1]
+        # translucent buttons must blend onto the shell, not punch see-through holes in it
+        c = render(zones, rows, DEFAULT_PALETTE, None, fills, usage, unfolded=True, theme=theme)
+        ok = ok and c.getpixel((PANEL_WIDTH // 4 + 30, c.height - PANEL_PAD - 6))[3] == 255
     return ok
 
 

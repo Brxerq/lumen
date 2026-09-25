@@ -39,7 +39,7 @@ DEFAULT_SETTINGS = {
     "notch_completed_hide_min": 30,  # remove completed tabs from the status tab after N minutes; 0 = never
     "notch_offset": -1,           # where along the edge, 0..100 % of the screen width; -1 = the preset above
     "notch_size": "regular",      # thin | regular | thick
-    "notch_theme": "liquid",      # liquid | dynamic | minimal | rog | studio
+    "notch_theme": "liquid",      # liquid | dynamic | minimal | rog | studio | paper | terminal | aurora
     "notch_opacity": 96,          # 30..100 %
     "notch_hide_fullscreen": True,  # stay out of the way of full-screen games and films
     # what the tab shows; untick down to "just my Claude/Gemini limits and the live tabs"
@@ -84,8 +84,8 @@ def _coerce(key: str, value):
         raise ValueError("notch_agents: all, claude, codex or gemini")
     if key == "notch_size" and value not in ("thin", "regular", "thick"):
         raise ValueError("notch_size: thin, regular or thick")
-    if key == "notch_theme" and value not in ("liquid", "dynamic", "minimal", "rog", "studio"):
-        raise ValueError("notch_theme: liquid, dynamic, minimal, rog or studio")
+    if key == "notch_theme" and value not in ("liquid", "dynamic", "minimal", "rog", "studio", "paper", "terminal", "aurora"):
+        raise ValueError("notch_theme: liquid, dynamic, minimal, rog, studio, paper, terminal or aurora")
     if key in SETTING_RANGES:
         low, high = SETTING_RANGES[key]
         assert isinstance(value, int)
