@@ -94,8 +94,12 @@ class ClaudeCode(AgentIntegration):
               "agent.session.finished", "agents.status", "claude.usage")
     hooks_file = CLAUDE_HOME / "settings.json"
     hooks = CLAUDE_HOOKS
-    docs = ("Connect installs a hook command in `~/.claude/settings.json` that reports each session's "
-            "state. Without hooks, Lumen still reads the session transcripts to tell busy from idle, "
+    # One lumen.exe per tool call cost ~1.8s of process start each (the frozen
+    # build unpacks itself every run). Claude Code posts to the daemon instead.
+    hook_transport = "http"
+    hook_timeout = 2
+    docs = ("Connect installs HTTP hooks in `~/.claude/settings.json` that report each session's "
+            "state to Lumen. Without hooks, Lumen still reads the session transcripts to tell busy from idle, "
             "but cannot see permission prompts.")
 
     def truth(self, hooked: dict[str, str]) -> dict[str, bool]:

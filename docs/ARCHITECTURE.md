@@ -51,7 +51,7 @@ Lumen is one Python process: a daemon with a tray icon, an HTTP server on `127.0
 
 **Agents are read two ways.** Hooks give instant, precise state (including "waiting for you"), but they are async and can miss a `Stop`. The agent's own record (Claude transcript, Codex rollout) is authoritative for open/closed, so a stuck hook file can never leave a light on. See `integrations/agent_sessions.py::fold`.
 
-**The hook path is tiny.** `lumen hook` writes one small JSON file and exits; it imports nothing outside the standard library. The daemon folds the files on its own schedule.
+**The hook path is tiny.** Claude Code posts each hook to the daemon (`POST /api/hook`, an HTTP hook), which writes one small JSON file and answers 204: no process per tool call. Codex and Gemini run `lumen hook`, which writes the same file and exits; it imports nothing outside the standard library. The daemon folds the files on its own schedule.
 
 **Standard library first.** HTTP server, JSON, sqlite, sockets, tkinter (screen glow), winsound — all stdlib. Third-party packages are confined to adapters (`hidapi`, `openrgb-python`) and the tray (`pystray`, `pillow`), and every one is optional at import time.
 
@@ -63,7 +63,7 @@ Everything lives in one directory (`lumen.paths.data_dir()`):
 
 ```
 config.json      settings, rules, device/integration options
-sessions/        <session_id>.json written by `lumen hook`
+sessions/        <session_id>.json written by the hooks
 slots.json       pinned zone and name per agent session and project
 lumen.log        daemon output when running windowed
 ```

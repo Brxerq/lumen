@@ -82,6 +82,10 @@ _OUR_HOOK = re.compile(
     r'|(?:"[^"]+"|\S+) -m lumen hook'         # <python> -m lumen hook, quoted or not (source install)
     r")$"
 )
+# Claude Code posts its hooks to the daemon instead (see hook_url()).
+HOOK_PATH = "/api/hook"
+_OUR_HTTP_HOOK = re.compile(r"^http://127\.0\.0\.1:\d+/api/hook$")
+DEFAULT_PORT = 6733
 
 
 def _safe_session_id(value) -> str | None:
@@ -324,25 +328,40 @@ def hook_command() -> str:
     return f'"{sys.executable}" -m lumen hook'
 
 
+def hook_url(port: int | None = None) -> str:
+    """Where Claude Code posts its hooks: the daemon's own port, as it recorded
+    it on start (it may have moved off a taken default)."""
+    if port is None:
+        try:
+            port = int((paths.data_dir() / "daemon.port").read_text().strip())
+        except (OSError, ValueError):
+            port = DEFAULT_PORT
+    return f"http://127.0.0.1:{port}{HOOK_PATH}"
+
+
 def install_hooks(settings_path: Path, hooks: dict[str, str | None], command: str | None = None,
-                  async_: bool = True, timeout: int = 5) -> str:
-    """Merge our hook command into a Claude-style hooks file (idempotent).
+                  async_: bool = True, timeout: int = 5, url: str | None = None) -> str:
+    """Merge our hook into a Claude-style hooks file (idempotent).
     Other people's hooks are kept; older Lumen entries are replaced.
+    With `url` it is an HTTP hook posting to the daemon, otherwise a command.
     `timeout` is in the agent's own unit: seconds for Claude/Codex, ms for Gemini."""
-    command = command or hook_command()
+    target = url or command or hook_command()
     data = _read_json(settings_path, strict=True)
     data.setdefault("hooks", {})
     _strip_ours(data["hooks"])
     for event, matcher in hooks.items():
-        entry = {"type": "command", "command": command, "timeout": timeout}
-        if async_:
-            entry["async"] = True
+        if url:  # HTTP hooks cannot be async; a refused connection costs Claude nothing
+            entry: dict[str, Any] = {"type": "http", "url": url, "timeout": timeout}
+        else:
+            entry = {"type": "command", "command": target, "timeout": timeout}
+            if async_:
+                entry["async"] = True
         group: dict[str, Any] = {"hooks": [entry]}
         if matcher:
             group["matcher"] = matcher
         data["hooks"].setdefault(event, []).append(group)
     _write_json(settings_path, data)
-    return command
+    return target
 
 
 def uninstall_hooks(settings_path: Path) -> bool:
@@ -355,10 +374,19 @@ def uninstall_hooks(settings_path: Path) -> bool:
     return removed
 
 
-def hooks_installed(settings_path: Path) -> bool:
+def _is_ours(hook: dict) -> bool:
+    return bool(_OUR_HOOK.search(hook.get("command", "")) or _OUR_HTTP_HOOK.match(hook.get("url", "")))
+
+
+def installed_targets(settings_path: Path) -> set[str]:
+    """The command or URL of every Lumen hook in the file."""
     data = _read_json(settings_path)
-    return any(_OUR_HOOK.search(h.get("command", "")) for groups in data.get("hooks", {}).values()
-               for g in groups for h in g.get("hooks", []))
+    return {h.get("url") or h.get("command", "") for groups in data.get("hooks", {}).values()
+            for g in groups for h in g.get("hooks", []) if _is_ours(h)}
+
+
+def hooks_installed(settings_path: Path) -> bool:
+    return bool(installed_targets(settings_path))
 
 
 def _strip_ours(hooks: dict) -> bool:
@@ -366,7 +394,7 @@ def _strip_ours(hooks: dict) -> bool:
     for event in list(hooks):
         kept = []
         for group in hooks[event]:
-            inner = [h for h in group.get("hooks", []) if not _OUR_HOOK.search(h.get("command", ""))]
+            inner = [h for h in group.get("hooks", []) if not _is_ours(h)]
             removed |= len(inner) != len(group.get("hooks", []))
             if inner:
                 kept.append({**group, "hooks": inner})
@@ -650,6 +678,7 @@ class AgentIntegration(Integration):
     hooks: dict[str, str | None] = {}
     hooks_async = True
     hook_timeout = 5  # seconds, in Claude Code's and Codex's settings
+    hook_transport = "command"  # or "http": post to the daemon, no process per event
     poll_interval_s = 0.5
     can_connect = True
     prune_hooked = True  # truth() covers every hooked session, so one it omits has closed
@@ -731,7 +760,17 @@ class AgentIntegration(Integration):
         return [s for s in all_sessions() if s["agent"] == self.agent]
 
     def start(self) -> None:
+        self._refresh_hooks()
         threading.Thread(target=self._loop, name=f"lumen-{self.agent}", daemon=True).start()
+
+    def _refresh_hooks(self) -> None:
+        """Point installed HTTP hooks at the port this daemon landed on, and move
+        command hooks from older versions over to HTTP."""
+        if self.hook_transport != "http":
+            return
+        targets = installed_targets(self.hooks_file)
+        if targets and targets != {hook_url()}:
+            print(f"{self.agent}: {self.connect()}", flush=True)
 
     def stop(self) -> None:
         self._stop.set()
@@ -801,10 +840,12 @@ class AgentIntegration(Integration):
 
     def connect(self) -> str:
         try:
-            cmd = install_hooks(self.hooks_file, self.hooks, async_=self.hooks_async, timeout=self.hook_timeout)
+            url = hook_url() if self.hook_transport == "http" else None
+            target = install_hooks(self.hooks_file, self.hooks, async_=self.hooks_async, timeout=self.hook_timeout, url=url)
         except ValueError as e:
             return str(e)
-        return f"Hooks installed in {self.hooks_file} (command: {cmd}). Sessions started from now on report their status."
+        kind = "posting to" if url else "command:"
+        return f"Hooks installed in {self.hooks_file} ({kind} {target}). Sessions started from now on report their status."
 
     def disconnect(self) -> str:
         try:

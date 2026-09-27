@@ -10,6 +10,7 @@ Bound to 127.0.0.1 only. Standard library, no framework.
     POST /api/adapters/<name>/<action>  {...}   adapter-specific setup (e.g. hue/pair)
     GET  /api/rules · PUT /api/rules [..] · POST /api/rules {rule} · DELETE /api/rules/<id>
     POST /api/events         {"type": "...", "data": {...}}   (webhook; bearer token if configured)
+    POST /api/hook           a Claude Code hook payload (its HTTP hooks post here)
     PUT  /api/settings       {partial settings}
     POST /api/integrations/<id>/connect | /disconnect · PATCH /api/integrations/<id> {options}
     POST /api/onboarded
@@ -380,6 +381,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json(200, {"cleared": True})
                 case ("POST", "api", "events"):
                     return self._webhook(body)
+                case ("POST", "api", "hook"):
+                    return self._agent_hook(body)
                 case ("PUT", "api", "settings"):
                     if "autostart" in body:
                         # The OS half goes first, and what it actually did is what
@@ -438,6 +441,18 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(500, {"error": "internal error"})
         finally:
             e.bump()  # every route reachable from here changes what the dashboard shows
+
+    def _agent_hook(self, body: dict) -> None:
+        """Claude Code's HTTP hook: the same record `lumen hook` writes, without
+        starting a process. An empty 2xx tells Claude Code "no decision"."""
+        from lumen.integrations.agent_sessions import apply_hook
+        try:
+            apply_hook(body)
+        except OSError:
+            pass  # never fail the agent over our state dir
+        self.send_response(204)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def _webhook(self, body: dict) -> None:
         token = self.engine.config.settings.get("webhook_token")

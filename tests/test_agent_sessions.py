@@ -568,3 +568,31 @@ def test_codex_retries_startup_recovery_after_tracking_failure(monkeypatch):
     integ._poll()
     assert calls == [True, True]
     assert integ.sessions[0]['status'] == RUNNING
+
+
+def test_claude_hooks_post_to_the_daemon_and_migrate_old_commands(tmp_path, monkeypatch):
+    from lumen.integrations.claude_code import ClaudeCode
+    monkeypatch.setenv("LUMEN_HOME", str(tmp_path / "home"))
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "node other.js"}]}]}}))
+    ag.install_hooks(settings, ag.CLAUDE_HOOKS, command="lumen hook")  # what 0.8.x installed
+    monkeypatch.setattr(ClaudeCode, "hooks_file", settings)
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "daemon.port").write_text("6740")
+
+    ClaudeCode(lambda e: None, {})._refresh_hooks()  # daemon start
+    data = json.loads(settings.read_text())
+    ours = [h for groups in data["hooks"].values() for g in groups for h in g["hooks"] if h.get("type") == "http"]
+    assert len(ours) == len(ag.CLAUDE_HOOKS)
+    assert all(h == {"type": "http", "url": "http://127.0.0.1:6740/api/hook", "timeout": 2} for h in ours)
+    assert ag.installed_targets(settings) == {"http://127.0.0.1:6740/api/hook"}
+    assert data["hooks"]["Stop"][0]["hooks"][0]["command"] == "node other.js"
+
+    (tmp_path / "home" / "daemon.port").write_text("6733")  # daemon came up on another port
+    ClaudeCode(lambda e: None, {})._refresh_hooks()
+    assert ag.installed_targets(settings) == {"http://127.0.0.1:6733/api/hook"}
+
+    assert ag.uninstall_hooks(settings)
+    assert json.loads(settings.read_text())["hooks"] == {"Stop": [{"hooks": [{"type": "command", "command": "node other.js"}]}]}
+    ClaudeCode(lambda e: None, {})._refresh_hooks()  # disconnected stays disconnected
+    assert not ag.hooks_installed(settings)

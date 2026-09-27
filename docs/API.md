@@ -78,6 +78,7 @@ PATCH /api/sessions/<id>   {"slot": 2}                which zone this tab owns; 
 PATCH /api/sessions/<id>   {"label": "API refactor"}  name a tab so its zone means something
 PUT   /api/sessions/order  ["id", "id", ...]          lay these tabs over the zones they already occupy, in this order
 DELETE /api/sessions/<id>                             forget a tab that closed without a SessionEnd hook
+POST  /api/hook            <Claude Code hook payload>  where Claude Code's HTTP hooks post; answers 204
 ```
 
 A slot or label set this way is pinned in `slots.json` under both the session id and its working directory, so it survives the tab, the daemon, and the next tab you open in that project. Pins are forgotten after a week.

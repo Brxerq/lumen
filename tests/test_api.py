@@ -3,6 +3,7 @@
 The `server` fixture (engine + HTTP server + fake devices) lives in conftest.py.
 """
 
+import json
 import urllib.error
 import urllib.request
 
@@ -150,3 +151,12 @@ def test_paused_with_keep_lit_holds_the_colour_and_catches_up_on_resume(server):
     assert light.colors[-1] == held  # paused: not reacting
     call("POST", "/api/pause", {"paused": False})
     assert light.colors[-1] != held  # resumed: shows what changed meanwhile
+
+
+def test_claude_http_hook_writes_the_session_record(server):
+    from lumen import paths
+    call, *_ = server
+    status, body = call("POST", "/api/hook", {"hook_event_name": "UserPromptSubmit", "session_id": "http-s1"})
+    assert status == 204 and body is None
+    assert json.loads((paths.sessions_dir() / "http-s1.json").read_text())["status"] == "running"
+    assert call("POST", "/api/hook", {"hook_event_name": "Bogus", "session_id": "x"})[0] == 204  # never fail the agent

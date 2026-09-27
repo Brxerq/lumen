@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-09-27
+
+### Changed
+- Claude Code hooks are now HTTP hooks that post to the running daemon (`POST /api/hook`) instead of starting `lumen.exe` on every tool call. The frozen Windows build unpacks itself on each start, so every hook cost about 1.8 s of CPU and disk; with several Claude tabs open that was dozens of short-lived processes a minute. Existing hooks are switched over automatically when Lumen starts, and follow the daemon if it lands on another port. Codex and Gemini keep the command hook.
+
 ## [0.8.4] — 2026-09-25
 
 ### Added
