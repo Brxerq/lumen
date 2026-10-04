@@ -147,6 +147,7 @@ def test_burn_rate_needs_two_rising_samples(monkeypatch):
 
 
 def test_login_without_a_known_expiry_is_tried_not_discarded(tmp_path, monkeypatch):
+    monkeypatch.setattr(cu.sys, "platform", "win32")
     f = tmp_path / ".credentials.json"
     monkeypatch.setattr(cu, "CREDENTIALS_FILE", f)
     f.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "refreshToken": "", "expiresAt": 0}}))

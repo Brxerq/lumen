@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-## [0.8.6] — 2026-10-05
+## [0.8.7] — 2026-10-05
 
 ### Fixed
 - Notch status tab: tabs that share a colour (for example eleven running Claude sessions) are no longer merged into one bar, so each tab keeps its own bar, fill and accent again.
