@@ -134,7 +134,8 @@ def credentials(now: float | None = None) -> dict | None:
     oauth = data.get("claudeAiOauth")
     if not isinstance(oauth, dict) or not oauth.get("accessToken"):
         return None
-    if not _ms_past(oauth.get("expiresAt"), now):
+    expires = oauth.get("expiresAt")
+    if not expires or not _ms_past(expires, now):  # 0 / absent = expiry unknown: try it, the endpoint answers 401 if dead
         return oauth
     return renew(data, now)
 

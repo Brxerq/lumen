@@ -28,6 +28,10 @@ STATE_DB = CODEX_HOME / "state_5.sqlite"
 ACTIVE_WINDOW_S = 10 * 60
 # ponytail: unknown-task recovery is capped at 24h; older recovery needs persisted verified liveness.
 RECOVERY_WINDOW_S = 24 * 3600
+# An unhooked task whose turn never closed and whose rollout has been silent this long is a
+# killed `codex exec` worker, not a quiet tab. Without a ceiling it holds a zone for good, because
+# every known id is looked up again without a cutoff. Delegated turns have gone ~1h without a write.
+OPEN_TURN_STALE_S = 3 * 3600
 
 TURN_OPEN_EVENTS = {"task_started": True, "user_message": True, "task_complete": False, "turn_aborted": False}
 _scan: dict[Path, tuple[int, bool, bool, bool]] = {}  # rollout -> (bytes consumed, turn open, saw metadata, belongs)
@@ -151,6 +155,8 @@ def rollout_states(db: Path = STATE_DB, now: float | None = None, hooked=(), met
             continue
         if not state and tid not in hooked and updated_ms <= cutoff_ms:
             continue  # recovery discovers running tasks without seating old completed history
+        if state and tid not in hooked and now - max(modified, updated_ms / 1000) > OPEN_TURN_STALE_S:
+            continue  # killed mid-turn: its rollout never got a task_complete and never will
         out[tid] = out.get(tid, False) or state
         if metadata is not None:
             metadata[str(tid)] = {"started": updated_ms / 1000 if updated_ms else None,

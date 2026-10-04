@@ -124,6 +124,11 @@ class _Server(ThreadingHTTPServer):
     # socket. Only POSIX gets the "reuse a TIME_WAIT port" behaviour we want.
     allow_reuse_address = sys.platform != "win32"
 
+    def handle_error(self, request, client_address) -> None:
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return  # a browser tab closed mid-response: nothing to log
+        super().handle_error(request, client_address)
+
 
 class _Handler(BaseHTTPRequestHandler):
     engine: Engine  # set by make_server

@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.6] — 2026-10-05
+
+### Fixed
+- Notch status tab: tabs that share a colour (for example eleven running Claude sessions) are no longer merged into one bar, so each tab keeps its own bar, fill and accent again.
+- Codex tasks whose turn never closed (a killed `codex exec` worker) are dropped after 3 hours of silence instead of holding a notch slot and the Codex light bar forever. Tabs with a hook are unaffected.
+- Claude usage limits are read when Claude Code's login has no expiry recorded; the endpoint decides whether the token is still good.
+- ASUS Aura keyboard and light bar colours go through the LED gamma curve (`LED_GAMMA`) so amber, orange and mixes look saturated instead of pale. Pure red, green and blue are unchanged.
+- A dashboard tab that closes mid-response no longer writes a `ConnectionResetError` traceback to the log.
+
 ## [0.8.5] — 2026-09-27
 
 ### Changed

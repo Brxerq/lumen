@@ -126,11 +126,13 @@ class Notch(ScreenGlow):
         self.show = dict(SHOW_DEFAULTS)   # what the tab displays; Settings can trim it to "just my limits"
         self.agents = "all"               # whose sessions: all | claude | codex | gemini
         self.theme = "liquid"             # one of THEMES
+        self.layout: list | None = None   # session id that owns each zone (the sessions effect sets it), so two tabs of one colour stay two bars
 
     def child_command(self) -> list[str]:
         return child_command()
 
     def set_color(self, rgb) -> None:
+        self.layout = None  # one flat colour is not a per-tab layout
         self.set_zones([tuple(rgb)] * ZONE_COUNT)
 
     def set_zones(self, colors: list[RGB]) -> None:
@@ -143,7 +145,7 @@ class Notch(ScreenGlow):
                                "opacity": self.opacity, "port": self.port, "hide_fullscreen": self.hide_fullscreen,
                                "idle_hide_min": self.idle_hide_min,
                                "completed_hide_min": self.completed_hide_min,
-                               "show": self.show, "agents": self.agents}}
+                               "show": self.show, "agents": self.agents, "layout": self.layout}}
         self._send(" ".join("%d %d %d" % tuple(c) for c in colors) + " | " + json.dumps(payload))
 
 
@@ -313,6 +315,21 @@ def runs(zones: list[RGB]) -> list[tuple[RGB, int]]:
     return [(c, w) for c, w in out if c != (0, 0, 0)]
 
 
+def bars_for(zones: list[RGB], layout=None) -> list[tuple[RGB, int, str | None]]:
+    """(colour, width in zones, owning session id) per bar. Neighbouring zones merge
+    only while they belong to the same tab: with no layout (an older daemon, a flat
+    colour) that is plain `runs`, but two working tabs are both amber and used to
+    melt into one bar that could carry neither tab's context nor agent cap."""
+    owners = layout if isinstance(layout, list) and len(layout) == len(zones) else [None] * len(zones)
+    out: list[tuple[RGB, int, str | None]] = []
+    for z, sid in zip(zones, owners):
+        if out and out[-1][0] == z and out[-1][2] == sid:
+            out[-1] = (z, out[-1][1] + 1, sid)
+        else:
+            out.append((z, 1, sid))
+    return [b for b in out if b[0] != (0, 0, 0)]
+
+
 def _session_order(session: dict) -> tuple[int, int]:
     return ({"running": 0, "input": 1, "done": 2}.get(str(session.get("status")), 3),
             int(session.get("slot", 0)))
@@ -448,7 +465,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
            opaque_key: RGB | None = None, fills: list[int | None] | None = None, usage: dict | None = None,
            unfolded: bool = False, now: float | None = None, flip: bool = False, glow_gain: float = 1.0,
            size: str = "regular", rounded: bool = False, accents: list[RGB | None] | None = None,
-           theme: str = "dynamic", expanded_usage=()):
+           theme: str = "dynamic", expanded_usage=(), bars: list[tuple[RGB, int]] | None = None):
     """The tab as an RGBA Pillow image (composited onto `opaque_key` where the
     platform can't do per-pixel alpha). `unfolded` = the hover panel: session
     rows, then the usage meters. `fills` is one context-window percentage per
@@ -457,7 +474,8 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
     `glow_gain` > 1 brightens the bar glow for the "needs you" pulse; `size`
     picks the folded tab's thickness (thin | regular | thick); `rounded` rounds
     every corner (the panel beside a left/right tab touches no edge); `accents`
-    is one agent colour per bar (None = no cap), drawn as a cap on the bar."""
+    is one agent colour per bar (None = no cap), drawn as a cap on the bar;
+    `bars` is the (colour, width) of each bar when the caller knows better than `runs(zones)`."""
     from PIL import Image, ImageDraw, ImageFilter
 
     height, bar_h, width = SIZES.get(size, SIZES["regular"])
@@ -514,7 +532,7 @@ def render(zones: list[RGB], rows: list[tuple], palette: dict[str, RGB],
                             radius=SS, fill=(255, 255, 255, 75))
 
     # session bars, each lit from beneath
-    bars = runs(zones)
+    bars = runs(zones) if bars is None else bars
     if bars:
         inner = W - 2 * BAR_INSET * SS - (USAGE_W * SS if five is not None and not unfolded else 0)
         total = sum(n for _, n in bars)
@@ -1002,12 +1020,22 @@ def run_child() -> int:
         rows = apply_show(session_rows(shown_sessions), flags)
         bar_rows = apply_show(session_rows(shown_sessions, prioritize=False), flags)
         usage = visible_usage(state["usage"], state["sessions"], flags, str(opts.get("agents") or "all"), opts)
-        # one bar per tab (the effect merges same-colour neighbours): only then can a bar carry its tab's context
-        fills = [r[3] for r in bar_rows] if len(bar_rows) == len(runs(zones)) else None
+        layout = opts.get("layout")
+        bars: list[tuple[RGB, int]] | None = None
+        if isinstance(layout, list) and len(layout) == len(zones):
+            # the daemon says which tab owns which zone: one bar per tab, each with its own context and agent cap.
+            # A zone whose tab is filtered out (one agent only) or retired (old "done") draws nothing.
+            by_id = {s.get("id"): r for s, r in zip(sorted(shown_sessions, key=lambda s: int(s.get("slot", 0))), bar_rows)}
+            owned = [b for b in bars_for(zones, layout) if b[2] is None or b[2] in by_id]
+            bars = [(c, n) for c, n, _ in owned]
+            fills = [by_id[sid][3] if sid in by_id else None for _, _, sid in owned]
+            accents = bar_accents([by_id.get(sid, ("",)) for _, _, sid in owned], flags.get("accent", True))
+        else:  # no layout: one bar per tab only when the colours happen to keep every tab apart
+            fills = [r[3] for r in bar_rows] if len(bar_rows) == len(runs(zones)) else None
+            accents = bar_accents(bar_rows, flags.get("accent", True)) if fills is not None else None
         left = state["pulse_until"] - time.time()
         gain = 1.0 + 0.9 * abs(math.sin(left * 4)) if left > 0 else 1.0
-        accents = bar_accents(bar_rows, flags.get("accent", True)) if fills is not None else None
-        state["image"] = render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"],
+        state["image"] = render(zones, rows, DEFAULT_PALETTE, key, fills, usage, unfolded=state["hover"], bars=bars,
                     flip=position() == "bottom", glow_gain=gain, size=size(),
                     rounded=state["hover"] and position() in VERTICAL, accents=accents,
                     theme=str(opts.get("theme") or "dynamic"), expanded_usage=state["expanded_usage"])

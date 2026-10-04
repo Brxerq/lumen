@@ -144,3 +144,11 @@ def test_burn_rate_needs_two_rising_samples(monkeypatch):
     for i in range(30):
         cu.refresh(now=1000 + i)
     assert len(cu._samples) == cu.SAMPLES
+
+
+def test_login_without_a_known_expiry_is_tried_not_discarded(tmp_path, monkeypatch):
+    f = tmp_path / ".credentials.json"
+    monkeypatch.setattr(cu, "CREDENTIALS_FILE", f)
+    f.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "refreshToken": "", "expiresAt": 0}}))
+    assert cu.credentials(now=3_000)["accessToken"] == "tok"  # 0 is "unknown", not "expired in 1970"
+

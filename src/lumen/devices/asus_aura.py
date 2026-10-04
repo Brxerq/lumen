@@ -34,6 +34,7 @@ USAGE_PAGE, USAGE = 0xFF31, 0x79
 REPORT_LEN = 64
 VERIFIED_PIDS = {0x19B6: "ROG Strix G513RM"}
 KEYBOARD_ZONES, LIGHTBAR_ZONES = 4, 2
+LED_GAMMA = 1.8  # calibration knob: higher = deeper, more saturated mixes; 1.0 sends colors untouched
 
 
 def report(*head: int, data: bytes = b"") -> bytes:
@@ -130,7 +131,8 @@ class AuraSurface(Device):
         self._c, self._surface = controller, surface
 
     def set_zones(self, colors: list[RGB]) -> None:
-        colors_out: list[RGB] = cast(list[RGB], [tuple(c) for c in colors][: self.zone_count])
+        # The LEDs are driven linearly, so an unmapped mix (amber 255,180,0) looks pale and yellow-white.
+        colors_out: list[RGB] = cast(list[RGB], [calibrate_led(cast(RGB, tuple(c)), LED_GAMMA) for c in colors][: self.zone_count])
         setattr(self._c, self._surface, colors_out)
         self._c.flush()
 

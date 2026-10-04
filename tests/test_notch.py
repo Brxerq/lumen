@@ -206,3 +206,21 @@ def test_left_and_right_edges_round_the_panel_and_place_along_the_height():
     round_ = render(zones, [], DEFAULT_PALETTE, unfolded=True, rounded=True)
     assert flat.getpixel((0, 0))[3] > 0 and round_.getpixel((0, 0))[3] == 0   # the top corners are cut only when rounded
     assert tab_x(1080, 200, "top", 50) == 440                                  # the same rule, run along the height
+
+
+def test_same_coloured_tabs_stay_separate_bars():
+    from lumen.core.effects import session_layout
+    from lumen.core.rules import Action
+    from lumen.devices.notch import bars_for, runs
+
+    sessions = [{"id": "a", "agent": "claude", "slot": 0, "status": "running"},
+                {"id": "b", "agent": "claude", "slot": 1, "status": "running"}]
+    owners = session_layout(6, sessions, Action.from_dict({"effect": "sessions"}))
+    layout = [owners[i]["id"] if i in owners else None for i in range(6)]
+    assert layout == ["a", "a", "a", "b", "b", "b"]
+    amber = (255, 60, 0)
+    zones = [amber] * 6
+    assert runs(zones) == [(amber, 6)]                       # colours alone: one lump
+    assert bars_for(zones, layout) == [(amber, 3, "a"), (amber, 3, "b")]
+    assert bars_for(zones) == [(amber, 6, None)] and bars_for([(0, 0, 0)] * 6, layout) == []
+

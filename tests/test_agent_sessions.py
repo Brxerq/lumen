@@ -493,6 +493,22 @@ def test_codex_recovery_finds_quiet_running_tasks_after_restart(tmp_path):
     assert codex.rollout_states(db, now=now, hooked=['ancient']) == {'ancient': True}
 
 
+def test_codex_killed_worker_does_not_hold_a_zone_forever(tmp_path):
+    db = tmp_path / 'state.sqlite'
+    now = time.time()
+    with sqlite3.connect(db) as conn:
+        conn.execute('create table threads (id text, rollout_path text, archived int, updated_at_ms int)')
+        for tid, age in [('quiet', 3600), ('dead-worker', codex.OPEN_TURN_STALE_S + 60)]:
+            rollout = tmp_path / f'{tid}.jsonl'
+            rollout.write_text(json.dumps({'type': 'event_msg', 'payload': {'type': 'task_started'}}) + '\n')
+            os.utime(rollout, (now - age, now - age))
+            conn.execute('insert into threads values (?, ?, 0, ?)', (tid, str(rollout), int((now - age) * 1000)))
+    # discovery and the by-id "watch" lookup of an already seated task both apply the ceiling...
+    assert codex.rollout_states(db, now=now, recover=True, watch=['quiet', 'dead-worker']) == {'quiet': True}
+    # ...but a hooked tab (say, waiting on a permission prompt) is not dropped for being quiet
+    assert codex.rollout_states(db, now=now, hooked=['dead-worker'])['dead-worker'] is True
+
+
 def test_terminal_rollout_timestamp_overrides_stale_hook(tmp_path):
     db = tmp_path / 'state.sqlite'
     rollout = tmp_path / 'task.jsonl'

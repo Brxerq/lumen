@@ -132,18 +132,13 @@ def spread_zones(shown: dict[int, dict], n: int) -> dict[int, dict]:
     return out
 
 
-def session_zones(n: int, sessions: list[dict], action: Action) -> list[RGB]:
-    """Zone i shows the status color of the session in slot i + offset, and the
-    open tabs stretch to fill any zone none of them claimed.
+def session_layout(n: int, sessions: list[dict], action: Action) -> dict[int, dict]:
+    """zone -> the session that owns it: the session in slot i + offset, with the
+    open tabs stretched to fill any zone none of them claimed.
 
     With more sessions than zones, a session that needs you (or is working)
     beyond the last zone borrows a free zone, else the zone of the last idle
     session: the whole point of the keyboard is to see the tab that is busy."""
-    if not sessions:
-        # Nothing to lay out: show the idle colour, the same as the folded layout
-        # does. A device dedicated to one agent going black the moment that agent
-        # has no tabs open reads as broken, not as idle.
-        return [scale(action.palette.get("done", (0, 0, 0)), action.brightness)] * n
     shown: dict[int, dict] = {}
     hidden = []
     for s in sessions:
@@ -159,8 +154,18 @@ def session_zones(n: int, sessions: list[dict], action: Action) -> list[RGB]:
         shown[min(spare, key=lambda i: (i in shown, -i))] = s  # a free zone first, then the last idle one
     if 0 < len(shown) < n:
         shown = spread_zones(shown, n)
+    return shown
+
+
+def session_zones(n: int, sessions: list[dict], action: Action) -> list[RGB]:
+    """Zone i shows the status color of the session that owns it (see session_layout)."""
+    if not sessions:
+        # Nothing to lay out: show the idle colour, the same as the folded layout
+        # does. A device dedicated to one agent going black the moment that agent
+        # has no tabs open reads as broken, not as idle.
+        return [scale(action.palette.get("done", (0, 0, 0)), action.brightness)] * n
     zones = [(0, 0, 0)] * n
-    for i, s in shown.items():
+    for i, s in session_layout(n, sessions, action).items():
         zones[i] = scale(action.palette.get(s.get("status"), (0, 0, 0)), action.brightness)
     return zones
 
@@ -252,6 +257,9 @@ class EffectPlayer:
             sessions = agent_sessions((event.data.get("sessions") if event else None) or [], action.agent)
             if action.per_zone and device.supports(ZONES) and device.zone_count > 1:
                 zones = session_zones(device.zone_count, sessions, action)
+                if hasattr(device, "layout"):  # a device that draws one bar per tab needs to know which zone is whose
+                    owners = session_layout(device.zone_count, sessions, action)
+                    device.layout = [owners[i].get("id") if i in owners else None for i in range(device.zone_count)]  # type: ignore[attr-defined]
                 with self._lock:
                     self._base[device.id] = zones
                     self._active.pop(device.id, None)

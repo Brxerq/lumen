@@ -33,8 +33,28 @@ def test_surfaces_share_one_frame():
     c = FakeController()
     kb = asus_aura.AuraSurface(c, "keyboard", 4, "G513RM", True)
     lb = asus_aura.AuraSurface(c, "lightbar", 2, "G513RM", True)
-    kb.set_zones([(1, 0, 0), (2, 0, 0), (3, 0, 0), (4, 0, 0)])
-    lb.set_color((0, 0, 9))
+    asus_aura.LED_GAMMA, gamma = 1.0, asus_aura.LED_GAMMA  # byte layout here, calibration below
+    try:
+        kb.set_zones([(1, 0, 0), (2, 0, 0), (3, 0, 0), (4, 0, 0)])
+        lb.set_color((0, 0, 9))
+    finally:
+        asus_aura.LED_GAMMA = gamma
     assert c.sent[-1][9:21] == bytes([1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0])
     assert c.sent[-1][27:33] == bytes([0, 0, 9]) * 2
     assert kb.zone_count == 4 and "zones" in kb.capabilities and kb.kind == "keyboard" and lb.kind == "lightbar"
+
+
+def test_colors_are_calibrated_for_the_leds_but_primaries_stay_pure():
+    class Frame(asus_aura.AuraController):
+        def flush(self):
+            pass
+
+    c = Frame(b"path", 0x19B6)
+    lb = asus_aura.AuraSurface(c, "lightbar", 2, "G513RM", True)
+    lb.set_color((255, 180, 0))                           # amber: pale yellow-white when sent as is
+    r, g, b = c.lightbar[0]
+    assert (r, b) == (255, 0) and 100 < g < 150           # a deeper orange, same hue family
+    for pure in [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 0, 0)]:
+        lb.set_color(pure)
+        assert c.lightbar[0] == pure
+
